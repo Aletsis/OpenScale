@@ -1,0 +1,8 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+  - "e2e/harness"
+
+allowBuilds:
+  esbuild: true
+  "@biomejs/biome": true

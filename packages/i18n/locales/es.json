@@ -1,0 +1,47 @@
+{
+  "app": {
+    "name": "OpenScale",
+    "tagline": "Suite Open Source para administración de básculas comerciales"
+  },
+  "nav": {
+    "dashboard": "Panel",
+    "scales": "Básculas",
+    "catalog": "Catálogo PLU",
+    "sync": "Sincronización",
+    "reports": "Ventas y Reportes",
+    "service": "Consola de Servicio",
+    "settings": "Configuración"
+  },
+  "scales": {
+    "discover": "Descubrir Básculas",
+    "discovering": "Escaneando red...",
+    "status": {
+      "online": "En línea",
+      "offline": "Sin conexión",
+      "syncing": "Sincronizando",
+      "error": "Error",
+      "unknown": "Desconocido"
+    }
+  },
+  "catalog": {
+    "title": "Catálogo Maestro de PLUs",
+    "addPlu": "Nuevo PLU",
+    "searchPlaceholder": "Buscar por PLU, descripción o EAN...",
+    "columns": {
+      "did": "Depto",
+      "plu": "PLU",
+      "description": "Descripción",
+      "price1": "Precio",
+      "productType": "Tipo",
+      "ean": "EAN"
+    }
+  },
+  "common": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "refresh": "Actualizar",
+    "language": "Idioma",
+    "noData": "No se encontraron registros"
+  }
+}

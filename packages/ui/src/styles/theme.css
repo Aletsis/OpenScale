@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: var(--os-background);
+  --color-foreground: var(--os-foreground);
+  --color-card: var(--os-card);
+  --color-card-foreground: var(--os-card-foreground);
+  --color-primary: var(--os-primary);
+  --color-primary-foreground: var(--os-primary-foreground);
+  --color-secondary: var(--os-secondary);
+  --color-secondary-foreground: var(--os-secondary-foreground);
+  --color-muted: var(--os-muted);
+  --color-muted-foreground: var(--os-muted-foreground);
+  --color-border: var(--os-border);
+  --color-destructive: var(--os-destructive);
+  --color-destructive-foreground: var(--os-destructive-foreground);
+  --radius-md: 0.5rem;
+}
+
+:root {
+  --os-background: #f8fafc;
+  --os-foreground: #0f172a;
+  --os-card: #ffffff;
+  --os-card-foreground: #0f172a;
+  --os-primary: #0f766e;
+  --os-primary-foreground: #f0fdfa;
+  --os-secondary: #e2e8f0;
+  --os-secondary-foreground: #0f172a;
+  --os-muted: #f1f5f9;
+  --os-muted-foreground: #475569;
+  --os-border: #cbd5e1;
+  --os-destructive: #dc2626;
+  --os-destructive-foreground: #fef2f2;
+}
+
+.dark {
+  --os-background: #090d16;
+  --os-foreground: #f8fafc;
+  --os-card: #111827;
+  --os-card-foreground: #f8fafc;
+  --os-primary: #14b8a6;
+  --os-primary-foreground: #042f2e;
+  --os-secondary: #1e293b;
+  --os-secondary-foreground: #f8fafc;
+  --os-muted: #1e293b;
+  --os-muted-foreground: #94a3b8;
+  --os-border: #334155;
+  --os-destructive: #ef4444;
+  --os-destructive-foreground: #fef2f2;
+}

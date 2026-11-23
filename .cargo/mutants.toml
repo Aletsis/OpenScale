@@ -1,0 +1,8 @@
+# Configuration for cargo-mutants (Rust mutation testing)
+# Run locally with: cargo mutants --workspace
+timeout_multiplier = 3.0
+minimum_test_timeout = 20
+exclude_globs = [
+    "crates/*/src/error.rs",
+    "crates/*/tests/**",
+]

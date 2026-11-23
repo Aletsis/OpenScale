@@ -1,0 +1,30 @@
+name: Mutation Testing
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1" # Weekly Monday 04:00 UTC
+
+jobs:
+  typescript-mutation:
+    name: TypeScript Mutation Testing (StrykerJS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:mutation
+
+  rust-mutation:
+    name: Rust Mutation Testing (cargo-mutants)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-mutants
+      - run: cargo mutants --workspace --no-shuffle

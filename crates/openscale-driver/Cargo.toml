@@ -1,0 +1,18 @@
+[package]
+name = "openscale-driver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "ScaleDriver trait, declarative DriverCapabilities, and connection events for OpenScale."
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+openscale-domain = { path = "../openscale-domain" }
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

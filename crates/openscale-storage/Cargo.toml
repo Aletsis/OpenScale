@@ -1,0 +1,23 @@
+[package]
+name = "openscale-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SQLx persistence layer (SQLite WAL, PostgreSQL-ready schema) for OpenScale."
+
+[dependencies]
+chrono.workspace = true
+openscale-domain = { path = "../openscale-domain" }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

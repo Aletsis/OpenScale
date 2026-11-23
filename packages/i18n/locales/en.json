@@ -1,0 +1,47 @@
+{
+  "app": {
+    "name": "OpenScale",
+    "tagline": "Open-source retail scale management suite"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "scales": "Scales",
+    "catalog": "PLU Catalog",
+    "sync": "Synchronization",
+    "reports": "Sales & Reports",
+    "service": "Service Console",
+    "settings": "Settings"
+  },
+  "scales": {
+    "discover": "Discover Scales",
+    "discovering": "Scanning network...",
+    "status": {
+      "online": "Online",
+      "offline": "Offline",
+      "syncing": "Syncing",
+      "error": "Error",
+      "unknown": "Unknown"
+    }
+  },
+  "catalog": {
+    "title": "Master PLU Catalog",
+    "addPlu": "New PLU",
+    "searchPlaceholder": "Search by PLU, description, or EAN...",
+    "columns": {
+      "did": "Dept",
+      "plu": "PLU",
+      "description": "Description",
+      "price1": "Price",
+      "productType": "Type",
+      "ean": "EAN"
+    }
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "refresh": "Refresh",
+    "language": "Language",
+    "noData": "No records found"
+  }
+}
