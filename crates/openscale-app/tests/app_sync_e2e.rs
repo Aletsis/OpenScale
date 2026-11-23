@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use openscale_app::{OpenScaleApp, SyncMode};
 use openscale_domain::types::new_id;
 use openscale_domain::{
-    MoneyCents, Plu, PluKey, ProductType, Scale, ScaleFamily, ScaleStatus, SyncMetadata,
+    BarcodeFormat, Department, DeptTotals, GrandTotals, MachTotals, MoneyCents, Plu, PluKey,
+    PluTotals, ProductType, Scale, ScaleFamily, ScaleStatus, StoredText, SyncMetadata, Tare,
+    TaxRate,
 };
 use openscale_driver::{
     ConnectionState, DriverCapabilities, DriverError, ScaleDateTime, ScaleDriver, ScaleEvent,
@@ -107,6 +109,76 @@ impl ScaleDriver for MockScaleDriver {
     async fn delete_plu(&mut self, key: PluKey) -> Result<(), DriverError> {
         self.state.lock().unwrap().plus.remove(&key);
         Ok(())
+    }
+
+    async fn upsert_department(&mut self, _dept: &Department) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn upsert_tare(&mut self, _tare: &Tare) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn upsert_tax_rate(&mut self, _tax: &TaxRate) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn upsert_stored_text(
+        &mut self,
+        _text: &StoredText,
+        _table: u8,
+    ) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn upsert_barcode_format(&mut self, _fmt: &BarcodeFormat) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn read_grand_totals(&mut self, period: u8) -> Result<Option<GrandTotals>, DriverError> {
+        Ok(Some(GrandTotals {
+            period,
+            counter_sales: MoneyCents(50_000),
+            prepack_sales: MoneyCents(10_000),
+            transactions: 12,
+            gross_total: MoneyCents(60_000),
+            last_cleared_at: None,
+        }))
+    }
+
+    async fn read_mach_totals(&mut self, period: u8) -> Result<Option<MachTotals>, DriverError> {
+        Ok(Some(MachTotals {
+            period,
+            counter_sales: MoneyCents(50_000),
+            prepack_sales: MoneyCents(10_000),
+            transactions: 12,
+            gross_total: MoneyCents(60_000),
+        }))
+    }
+
+    async fn list_dept_totals(&mut self, period: u8) -> Result<Vec<DeptTotals>, DriverError> {
+        Ok(vec![DeptTotals {
+            period,
+            did: 1,
+            counter_sales: MoneyCents(50_000),
+            prepack_sales: MoneyCents(0),
+            transactions: 12,
+            last_cleared_at: None,
+        }])
+    }
+
+    async fn list_plu_totals(&mut self, period: u8) -> Result<Vec<PluTotals>, DriverError> {
+        Ok(vec![PluTotals {
+            period,
+            key: PluKey::new(1, 1).unwrap(),
+            transactions: 12,
+            counter_sales: MoneyCents(50_000),
+            counter_quantity: 5_000,
+            counter_transactions: 12,
+            prepack_sales: MoneyCents(0),
+            prepack_quantity: 0,
+            last_cleared_at: None,
+        }])
     }
 }
 
@@ -237,6 +309,114 @@ async fn scale_manager_and_delta_sync_lifecycle() {
     assert_eq!(report3.sent_plus, 3);
     assert_eq!(report3.skipped_unchanged, 0);
     assert_eq!(state.lock().unwrap().upserts, 5);
+
+    app.scales.unregister(scale_id).await;
+}
+
+#[tokio::test]
+async fn master_tables_sync_and_sales_snapshots_e2e() {
+    let db = Database::connect_in_memory().await.unwrap();
+    let app = OpenScaleApp::new(db);
+
+    let scale_id = new_id();
+    let scale = Scale {
+        id: scale_id,
+        group_id: None,
+        name: "Báscula Ventas".to_string(),
+        family: ScaleFamily::AveryBerkelXs,
+        ip_address: "192.168.9.114".to_string(),
+        data_port: 3001,
+        service_port: None,
+        serial_number: None,
+        model: Some("XS200".to_string()),
+        firmware_version: None,
+        mac_address: None,
+        status: ScaleStatus::Online,
+        last_seen_at: None,
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    };
+    app.upsert_scale(scale).await.unwrap();
+    assert_eq!(app.list_scales().await.unwrap().len(), 1);
+
+    let state = Arc::new(Mutex::new(InMemoryDriverState::default()));
+    app.scales
+        .register_driver(
+            scale_id,
+            Box::new(MockScaleDriver {
+                state: Arc::clone(&state),
+            }),
+        )
+        .await;
+
+    // Master tables CRUD
+    app.upsert_department(Department {
+        id: new_id(),
+        did: 1,
+        name: "CARNICERIA".to_string(),
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.list_departments().await.unwrap().len(), 1);
+
+    app.upsert_tare(Tare {
+        id: new_id(),
+        cid: 1,
+        name: "Charola".to_string(),
+        weight_grams: 20,
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.list_tares().await.unwrap().len(), 1);
+
+    app.upsert_tax_rate(TaxRate {
+        id: new_id(),
+        tax_id: 1,
+        name: "IVA 16%".to_string(),
+        rate_basis_points: 1600,
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.list_tax_rates().await.unwrap().len(), 1);
+
+    app.upsert_stored_text(StoredText {
+        id: new_id(),
+        text_id: 1,
+        title: "Aviso".to_string(),
+        content: "MANTENGA REFRIGERADO".to_string(),
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.list_stored_texts().await.unwrap().len(), 1);
+
+    app.upsert_barcode_format(BarcodeFormat {
+        id: new_id(),
+        bid: 1,
+        name: "EAN-13".to_string(),
+        definition_json: r#"{"bmc":0,"bt":3,"bpd":1,"subtype":3,"template":"2NNAAAAWWWWWC"}"#
+            .to_string(),
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.list_barcode_formats().await.unwrap().len(), 1);
+
+    // Sync master tables exercises ScaleHandle + actor commands
+    let sent = app.sync_master_tables(scale_id).await.unwrap();
+    assert_eq!(sent, 5);
+
+    // Capture sales snapshot & list snapshots (filtered + unfiltered)
+    let report = app.capture_sales_snapshot(scale_id, 0).await.unwrap();
+    assert_eq!(report.scale_id, scale_id);
+    assert_eq!(report.period, 0);
+
+    let by_scale = app.list_sales_snapshots(Some(scale_id), 10).await.unwrap();
+    assert_eq!(by_scale.len(), 1);
+    let all = app.list_sales_snapshots(None, 10).await.unwrap();
+    assert_eq!(all.len(), 1);
 
     app.scales.unregister(scale_id).await;
 }

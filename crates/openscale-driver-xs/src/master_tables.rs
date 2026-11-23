@@ -288,5 +288,53 @@ mod tests {
         let media = decode_media_asset_read(0, &media_payload, store_id).unwrap();
         assert_eq!(media.name, "calimax");
         assert_eq!(&media.data[0..2], b"BM");
+
+        // Stored text & read helpers
+        assert_eq!(encode_tare_read(5).unwrap(), [0, 0, 0, 0, 5]);
+        assert_eq!(encode_tax_read(2), [0, 0, 0, 0, 2]);
+        let st = StoredText {
+            id: new_id(),
+            text_id: 3,
+            title: "Promo".to_string(),
+            content: "GRACIAS POR SU COMPRA".to_string(),
+            meta: SyncMetadata::new(store_id),
+        };
+        let st_bytes = encode_stored_text_write(&st, 0).unwrap();
+        assert_eq!(st_bytes[0], 3);
+        assert_eq!(st_bytes[1], 0);
+        let mut st_read_payload = vec![3u8];
+        st_read_payload.extend_from_slice(&st_bytes[2..]);
+        let st_dec = decode_stored_text_read(&st_read_payload, store_id).unwrap();
+        assert_eq!(st_dec.text_id, 3);
+        assert_eq!(st_dec.content, "GRACIAS POR SU COMPRA");
+    }
+
+    #[test]
+    fn master_table_codecs_reject_invalid_inputs() {
+        let store_id = new_id();
+        assert!(decode_department_read(&[], store_id).is_err());
+        assert!(encode_tare_read(300).is_err());
+        assert!(decode_tare_read(&[0u8; 3], store_id).is_err());
+        assert!(decode_tax_read(&[0u8; 3], store_id).is_err());
+        assert!(decode_stored_text_read(&[], store_id).is_err());
+        assert!(decode_barcode_format_read(&[0u8; 3], store_id).is_err());
+        assert!(decode_media_asset_read(0, &[0u8; 10], store_id).is_err());
+
+        let bad_dept = Department {
+            id: new_id(),
+            did: 999,
+            name: "X".to_string(),
+            meta: SyncMetadata::new(store_id),
+        };
+        assert!(encode_department_write(&bad_dept).is_err());
+
+        let bad_bf = BarcodeFormat {
+            id: new_id(),
+            bid: 1,
+            name: "Bad".to_string(),
+            definition_json: "not-json".to_string(),
+            meta: SyncMetadata::new(store_id),
+        };
+        assert!(encode_barcode_format_write(&bad_bf).is_err());
     }
 }

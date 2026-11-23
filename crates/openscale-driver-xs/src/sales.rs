@@ -203,5 +203,44 @@ mod tests {
         assert_eq!(pt.transactions, 34);
         assert_eq!(pt.counter_sales, MoneyCents(130_480));
         assert_eq!(pt.counter_quantity, 18_640);
+
+        let mut group = vec![0u8; 83];
+        group[0x0B..0x13].copy_from_slice(&25_000i64.to_be_bytes());
+        group[0x13..0x1B].copy_from_slice(&5_000i64.to_be_bytes());
+        group[0x1B..0x1F].copy_from_slice(&7u32.to_be_bytes());
+        let grpt = decode_group_totals(0, 3, &group).unwrap();
+        assert_eq!(grpt.group_id, 3);
+        assert_eq!(grpt.counter_sales, MoneyCents(25_000));
+        assert_eq!(grpt.prepack_sales, MoneyCents(5_000));
+        assert_eq!(grpt.transactions, 7);
+
+        let mut op = vec![0u8; 311];
+        op[0x0B..0x13].copy_from_slice(&12_000i64.to_be_bytes());
+        op[0x13..0x1B].copy_from_slice(&3_000i64.to_be_bytes());
+        op[0x1F..0x23].copy_from_slice(&4u32.to_be_bytes());
+        let opt = decode_operator_totals(1, 2, &op).unwrap();
+        assert_eq!(opt.operator_id, 2);
+        assert_eq!(opt.counter_sales, MoneyCents(12_000));
+        assert_eq!(opt.transactions, 4);
+
+        let mut mach = vec![0u8; 303];
+        mach[0x09..0x11].copy_from_slice(&90_000i64.to_be_bytes());
+        mach[0x11..0x19].copy_from_slice(&10_000i64.to_be_bytes());
+        mach[0x19..0x1D].copy_from_slice(&20u32.to_be_bytes());
+        mach[0x4D..0x55].copy_from_slice(&100_000i64.to_be_bytes());
+        let mt = decode_mach_totals(0, &mach).unwrap();
+        assert_eq!(mt.counter_sales, MoneyCents(90_000));
+        assert_eq!(mt.gross_total, MoneyCents(100_000));
+        assert_eq!(mt.transactions, 20);
+    }
+
+    #[test]
+    fn rejects_short_sales_payloads() {
+        assert!(decode_grand_totals(0, &[0u8; 10]).is_err());
+        assert!(decode_dept_totals(0, &[0u8; 10]).is_err());
+        assert!(decode_group_totals(0, 1, &[0u8; 10]).is_err());
+        assert!(decode_operator_totals(0, 1, &[0u8; 10]).is_err());
+        assert!(decode_mach_totals(0, &[0u8; 10]).is_err());
+        assert!(decode_plu_totals(0, &[0u8; 10]).is_err());
     }
 }

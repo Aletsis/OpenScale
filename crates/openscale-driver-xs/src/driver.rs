@@ -1025,6 +1025,99 @@ mod tests {
                             (STATUS_PLU_NOT_FOUND, vec![])
                         }
                     }
+                    (CMD_DEPT_NAMES, ACTION_REQUEST) => {
+                        let mut out = vec![payload[0]];
+                        out.extend_from_slice(b"CARNICERIA\0");
+                        (STATUS_SUCCESS, out)
+                    }
+                    (CMD_DEPT_NAMES, ACTION_UPDATE) => (STATUS_SUCCESS, vec![]),
+                    (CMD_STORED_TARE, ACTION_REQUEST) => {
+                        let mut out = [0u8; 5];
+                        out[0..4].copy_from_slice(&25u32.to_be_bytes());
+                        out[4] = payload[4];
+                        (STATUS_SUCCESS, out.to_vec())
+                    }
+                    (CMD_STORED_TARE, ACTION_UPDATE) => (STATUS_SUCCESS, vec![]),
+                    (CMD_TAX_RATES, ACTION_REQUEST) => {
+                        let mut out = [0u8; 5];
+                        out[0..4].copy_from_slice(&1600u32.to_be_bytes());
+                        out[4] = payload[4];
+                        (STATUS_SUCCESS, out.to_vec())
+                    }
+                    (CMD_TAX_RATES, ACTION_UPDATE) => (STATUS_SUCCESS, vec![]),
+                    (CMD_STORED_TEXT, ACTION_REQUEST) => {
+                        let mut out = vec![payload[0]];
+                        out.extend_from_slice(b"PROMO\0");
+                        (STATUS_SUCCESS, out)
+                    }
+                    (CMD_STORED_TEXT, ACTION_UPDATE) => (STATUS_SUCCESS, vec![]),
+                    (CMD_BARCODE_FORMATS, ACTION_REQUEST) => {
+                        let mut out = vec![payload[0], 0, 3, 1, 3];
+                        out.extend_from_slice(b"2NNAAAAWWWWWC\0");
+                        (STATUS_SUCCESS, out)
+                    }
+                    (CMD_BARCODE_FORMATS, ACTION_UPDATE) => (STATUS_SUCCESS, vec![]),
+                    (CMD_MEDIA, ACTION_REQUEST) => {
+                        let mut out = vec![0u8; 40];
+                        out[2..6].copy_from_slice(b"logo");
+                        out[33..35].copy_from_slice(b"BM");
+                        (STATUS_SUCCESS, out)
+                    }
+                    (CMD_GRAND_TOTALS, ACTION_REQUEST) => {
+                        let mut grand = vec![0u8; 169];
+                        grand[0x09..0x11].copy_from_slice(&50_000i64.to_be_bytes());
+                        grand[0x19..0x1D].copy_from_slice(&10u32.to_be_bytes());
+                        grand[0x4D..0x55].copy_from_slice(&50_000i64.to_be_bytes());
+                        (STATUS_SUCCESS, grand)
+                    }
+                    (CMD_DEPT_TOTALS, ACTION_REQUEST) => {
+                        if payload[1] <= 1 {
+                            let mut dept = vec![0u8; 87];
+                            dept[0x01] = 1;
+                            dept[0x0B..0x13].copy_from_slice(&50_000i64.to_be_bytes());
+                            dept[0x1B..0x1F].copy_from_slice(&10u32.to_be_bytes());
+                            (STATUS_SUCCESS, dept)
+                        } else {
+                            (STATUS_NO_TOTALS_FOUND, vec![])
+                        }
+                    }
+                    (CMD_GROUP_TOTALS, ACTION_REQUEST) => {
+                        let mut grp = vec![0u8; 83];
+                        grp[0x0B..0x13].copy_from_slice(&20_000i64.to_be_bytes());
+                        grp[0x1B..0x1F].copy_from_slice(&5u32.to_be_bytes());
+                        (STATUS_SUCCESS, grp)
+                    }
+                    (CMD_OPERATOR_TOTALS, ACTION_REQUEST) => {
+                        let mut op = vec![0u8; 311];
+                        op[0x0B..0x13].copy_from_slice(&15_000i64.to_be_bytes());
+                        op[0x1F..0x23].copy_from_slice(&3u32.to_be_bytes());
+                        (STATUS_SUCCESS, op)
+                    }
+                    (CMD_MACH_TOTALS, ACTION_REQUEST) => {
+                        let mut mach = vec![0u8; 303];
+                        mach[0x09..0x11].copy_from_slice(&50_000i64.to_be_bytes());
+                        mach[0x19..0x1D].copy_from_slice(&10u32.to_be_bytes());
+                        mach[0x4D..0x55].copy_from_slice(&50_000i64.to_be_bytes());
+                        (STATUS_SUCCESS, mach)
+                    }
+                    (CMD_PLU_TOTALS, ACTION_REQUEST) => {
+                        let idx = u32::from_be_bytes([
+                            payload[33],
+                            payload[34],
+                            payload[35],
+                            payload[36],
+                        ]);
+                        if idx == 0 {
+                            let mut pt = vec![0u8; 166];
+                            let key = PluKey::new(1, 1).unwrap();
+                            pt[42..50].copy_from_slice(&key.to_xs_bytes().unwrap());
+                            pt[50..54].copy_from_slice(&10u32.to_be_bytes());
+                            pt[54..62].copy_from_slice(&50_000i64.to_be_bytes());
+                            (STATUS_SUCCESS, pt)
+                        } else {
+                            (STATUS_NO_TOTALS_FOUND, vec![])
+                        }
+                    }
                     _ => (-1117, vec![]),
                 };
 
@@ -1103,6 +1196,64 @@ mod tests {
 
         driver.delete_plu(key).await.unwrap();
         assert_eq!(driver.count_plus().await.unwrap(), 4);
+
+        // Master tables read/write lifecycle
+        let dept = driver.read_department(1).await.unwrap().unwrap();
+        assert_eq!(dept.did, 1);
+        driver.upsert_department(&dept).await.unwrap();
+
+        let tare = driver.read_tare(5).await.unwrap().unwrap();
+        assert_eq!(tare.weight_grams, 25);
+        driver.upsert_tare(&tare).await.unwrap();
+
+        let tax = driver.read_tax_rate(1).await.unwrap().unwrap();
+        assert_eq!(tax.rate_basis_points, 1600);
+        driver.upsert_tax_rate(&tax).await.unwrap();
+
+        let text = driver.read_stored_text(1, 0).await.unwrap().unwrap();
+        assert_eq!(text.content, "PROMO");
+        driver.upsert_stored_text(&text, 0).await.unwrap();
+
+        let bf = driver.read_barcode_format(1).await.unwrap().unwrap();
+        assert_eq!(bf.bid, 1);
+        driver.upsert_barcode_format(&bf).await.unwrap();
+
+        let media = driver.read_media_asset(0).await.unwrap().unwrap();
+        assert_eq!(media.name, "logo");
+
+        // Sales totals read lifecycle
+        let gt = driver.read_grand_totals(0).await.unwrap().unwrap();
+        assert_eq!(gt.counter_sales, MoneyCents(50_000));
+        assert_eq!(driver.list_dept_totals(0).await.unwrap().len(), 1);
+        assert_eq!(
+            driver
+                .read_group_totals(0, 1)
+                .await
+                .unwrap()
+                .unwrap()
+                .transactions,
+            5
+        );
+        assert_eq!(
+            driver
+                .read_operator_totals(0, 1)
+                .await
+                .unwrap()
+                .unwrap()
+                .transactions,
+            3
+        );
+        assert_eq!(
+            driver
+                .read_mach_totals(0)
+                .await
+                .unwrap()
+                .unwrap()
+                .gross_total,
+            MoneyCents(50_000)
+        );
+        assert_eq!(driver.list_plu_totals(0).await.unwrap().len(), 1);
+
         driver.disconnect().await.unwrap();
     }
 }
