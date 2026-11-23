@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use openscale_app::{
@@ -736,7 +738,7 @@ async fn delete_scale_soft_deletes_and_unregisters_actor() {
 }
 
 struct FlakyScaleDriver {
-    reachable: Arc<std::sync::atomic::AtomicBool>,
+    reachable: Arc<AtomicBool>,
     connected: bool,
 }
 
@@ -747,7 +749,7 @@ impl ScaleDriver for FlakyScaleDriver {
     }
 
     async fn connect(&mut self) -> Result<ScaleInfo, DriverError> {
-        if self.reachable.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.reachable.load(Ordering::SeqCst) {
             self.connected = true;
             Ok(ScaleInfo {
                 family: ScaleFamily::AveryBerkelXs,
@@ -775,7 +777,7 @@ impl ScaleDriver for FlakyScaleDriver {
         if !self.connected {
             return Err(DriverError::NotConnected);
         }
-        if self.reachable.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.reachable.load(Ordering::SeqCst) {
             Ok(())
         } else {
             self.connected = false;
@@ -832,8 +834,6 @@ impl ScaleDriver for FlakyScaleDriver {
 
 #[tokio::test]
 async fn health_monitor_detects_disconnect_and_recovery_transitions() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
     let db = Database::connect_in_memory().await.unwrap();
     let app = OpenScaleApp::new(db);
 
@@ -935,6 +935,23 @@ async fn health_monitor_detects_disconnect_and_recovery_transitions() {
             scale_id: id,
             state: ConnectionState::Connected,
             message: None,
+        } if id == scale_id
+    ));
+
+    // 6. Background monitor detects a drop automatically on its periodic tick
+    reachable.store(false, Ordering::SeqCst);
+    let monitor = app.start_health_monitor(Duration::from_millis(10));
+    let drop_event = tokio::time::timeout(Duration::from_secs(2), events.recv())
+        .await
+        .expect("monitor should emit disconnect event")
+        .expect("broadcast channel should remain open");
+    monitor.abort();
+    assert!(matches!(
+        drop_event,
+        ScaleEvent::ConnectionChanged {
+            scale_id: id,
+            state: ConnectionState::Disconnected,
+            message: Some(_),
         } if id == scale_id
     ));
 

@@ -110,16 +110,12 @@ export class HttpWsTransport implements OpenScaleTransport {
   checkScaleHealth(scaleId: string): Promise<ScaleHealthCheckResult> {
     return this.request<ScaleHealthCheckResult>(
       `/api/v1/scales/${encodeURIComponent(scaleId)}/health`,
-      {
-        method: "POST",
-      },
+      { method: "POST" },
     );
   }
 
   checkAllScalesHealth(): Promise<ScaleHealthCheckResult[]> {
-    return this.request<ScaleHealthCheckResult[]>("/api/v1/scales/health", {
-      method: "POST",
-    });
+    return this.request<ScaleHealthCheckResult[]>("/api/v1/scales/health", { method: "POST" });
   }
 
   listPlus(): Promise<Plu[]> {

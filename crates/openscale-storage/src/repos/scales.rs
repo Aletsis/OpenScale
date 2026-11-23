@@ -303,7 +303,7 @@ mod tests {
         let db = Database::connect_in_memory().await.unwrap();
         let repo = ScaleRepository::new(db.pool().clone());
 
-        let initial_seen = Utc::now() - chrono::Duration::minutes(5);
+        let initial_seen = Utc::now() - chrono::TimeDelta::minutes(5);
         let scale = Scale {
             id: new_id(),
             group_id: None,
