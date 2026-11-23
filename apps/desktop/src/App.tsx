@@ -47,6 +47,7 @@ import {
 import { type FormEvent, useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { LabelDesignerView } from "./components/LabelDesignerView.js";
 import { LabelFormatsView } from "./components/LabelFormatsView.js";
 import { MasterTablesView } from "./components/MasterTablesView.js";
 import { PluFormDialog } from "./components/PluFormDialog.js";
@@ -1031,11 +1032,23 @@ export function App() {
 
           {activeTab === "labels" && (
             <>
-              <h2 className="text-xl font-semibold tracking-tight">Label Formats (PFID 0..99)</h2>
-              <LabelFormatsView
+              <h2 className="text-xl font-semibold tracking-tight">
+                Label Designer (WYSIWYG — PFID 0..99)
+              </h2>
+              <LabelDesignerView
                 scales={scales}
+                plus={allPlus}
                 onStatus={(message) => toast({ variant: "info", message })}
               />
+              <div className="border-t border-border pt-4">
+                <h3 className="mb-3 text-sm font-semibold text-muted-foreground">
+                  Raw Field Inspector & Scale-to-Scale Clone
+                </h3>
+                <LabelFormatsView
+                  scales={scales}
+                  onStatus={(message) => toast({ variant: "info", message })}
+                />
+              </div>
             </>
           )}
 

@@ -3,3 +3,4 @@ export * from "./transport.js";
 export * from "./catalog-io.js";
 export * from "./sales-export.js";
 export * from "./lcd-renderer.js";
+export * from "./label-designer.js";

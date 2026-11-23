@@ -198,9 +198,9 @@ Cada driver declara sus capacidades para evitar condicionales por modelo en la U
 - [x] **Gestión de `LABEL_FORMATS`:** lectura de `PFID 0..99`, listado de campos, respaldo JSON/binario y clonación entre básculas.
 
 #### Hito `v1.0` — Diseñador Visual de Etiquetas (WYSIWYG)
-- [ ] **Editor Canvas drag-and-drop:** regla en mm (conversión a décimas de mm `X1,Y1,X2,Y2` y `FW` en centésimas de mm), 50 slots de campo (`FT`), rotación `0°/90°/180°/270°` y vista previa de fuentes ABML.
-- [ ] **Validación e impresión:** control de límites de `898 B`, vista previa con un PLU real, envío a báscula e impresión de prueba.
-- [ ] **Releases `v1.0`:** instaladores para Windows (`.msi`/`.exe`), macOS (`.dmg`) y Linux (`.AppImage`/`.deb`).
+- [x] **Editor Canvas drag-and-drop:** regla en mm (conversión a décimas de mm `X1,Y1,X2,Y2` y `FW` en centésimas de mm), 50 slots de campo (`FT`), rotación `0°/90°/180°/270°` y vista previa de fuentes ABML.
+- [x] **Validación e impresión:** control de límites de `898 B`, vista previa con un PLU real, envío a báscula e impresión de prueba.
+- [x] **Releases `v1.0`:** instaladores para Windows (`.msi`/`.exe`), macOS (`.dmg`) y Linux (`.AppImage`/`.deb`).
 
 ---
 
