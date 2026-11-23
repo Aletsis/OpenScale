@@ -192,12 +192,19 @@ impl XsServiceClient {
 
     /// Reads one encrypted `STX..ETX` frame by decrypting bytes as they arrive.
     async fn read_encrypted_frame(&mut self) -> Result<(bool, String, String), DriverError> {
+        self.read_encrypted_frame_with_timeout(self.timeout).await
+    }
+
+    async fn read_encrypted_frame_with_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<(bool, String, String), DriverError> {
         let mut crypt = XsServiceCrypt::new();
         let mut decrypted = Vec::with_capacity(256);
         let mut buf = [0u8; 1];
 
         loop {
-            tokio::time::timeout(self.timeout, self.stream.read_exact(&mut buf))
+            tokio::time::timeout(timeout, self.stream.read_exact(&mut buf))
                 .await
                 .map_err(|_| DriverError::Timeout)??;
             let plain = crypt.transform_byte(buf[0]);
@@ -228,27 +235,37 @@ impl XsServiceClient {
     }
 
     pub async fn send(&mut self, cmd: u8, payload: &str) -> Result<String, DriverError> {
+        self.send_with_timeout(cmd, payload, self.timeout).await
+    }
+
+    pub async fn send_with_timeout(
+        &mut self,
+        cmd: u8,
+        payload: &str,
+        timeout: Duration,
+    ) -> Result<String, DriverError> {
         let frame = encode_service_command(cmd, payload);
-        tokio::time::timeout(self.timeout, self.stream.write_all(&frame))
+        tokio::time::timeout(timeout, self.stream.write_all(&frame))
             .await
             .map_err(|_| DriverError::Timeout)??;
-        tokio::time::timeout(self.timeout, self.stream.flush())
+        tokio::time::timeout(timeout, self.stream.flush())
             .await
             .map_err(|_| DriverError::Timeout)??;
 
-        // Skip any lagging frames from previous commands until we receive the reply for `cmd`
+        // Skip any lagging reply frames from previous commands until we receive the reply for `cmd`.
+        // Surface `CommandError` immediately even when its error code differs from `cmd`.
         for _ in 0..150 {
-            let (is_err, code, data) = self.read_encrypted_frame().await?;
+            let (is_err, code, data) = self.read_encrypted_frame_with_timeout(timeout).await?;
             let parsed_code = code.trim().parse::<i32>().ok();
-            let matches_cmd = parsed_code == Some(i32::from(cmd)) || parsed_code == Some(0);
-            if !matches_cmd {
-                continue;
-            }
             if is_err {
                 return Err(DriverError::Protocol {
                     code: parsed_code,
                     message: format!("XsServicePort error {code}: {data}"),
                 });
+            }
+            let matches_cmd = parsed_code == Some(i32::from(cmd)) || parsed_code == Some(0);
+            if !matches_cmd {
+                continue;
             }
             return Ok(data);
         }
@@ -287,7 +304,8 @@ impl XsServiceClient {
     }
 
     pub async fn print_test_report(&mut self) -> Result<String, DriverError> {
-        self.send(47, "").await
+        let timeout = self.timeout.max(Duration::from_secs(15));
+        self.send_with_timeout(47, "", timeout).await
     }
 
     /// Reads multi-frame diagnostic log (`SYSTEM`, `COMMS`, `KEYBOARD`). `clear = false` (`0`) preserves log.
@@ -346,6 +364,13 @@ impl XsServiceClient {
         key_state: u8,
     ) -> Result<String, DriverError> {
         self.send(57, &format!("{scan_code},{key_state}")).await
+    }
+
+    /// Simulates a full key press (`key_state = 1`) followed by key release (`key_state = 0`).
+    pub async fn tap_keystroke(&mut self, scan_code: u8) -> Result<String, DriverError> {
+        self.write_keystroke(scan_code, 1).await?;
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        self.write_keystroke(scan_code, 0).await
     }
 
     pub async fn read_scale_settings(&mut self) -> Result<ScaleSettings748, DriverError> {
@@ -422,6 +447,12 @@ mod tests {
 
                 let reply = if text.starts_with("SelectCommand:14:") {
                     "\x02ReplyCommand:14:0.250,04/08,0.000,Balance,\x03"
+                } else if text.starts_with("SelectCommand:47:") {
+                    "\x02ReplyCommand:47:PRINT_OK\x03"
+                } else if text.starts_with("SelectCommand:57:99,") {
+                    "\x02CommandError:02:Invalid scan code\x03"
+                } else if text.starts_with("SelectCommand:57:") {
+                    "\x02ReplyCommand:57:KEY_OK\x03"
                 } else if text.starts_with("SelectCommand:62:") {
                     "\x02ReplyCommand:62:0001,8610011020214130,0020020110111000,0110110100111000,0100130010003200\x03"
                 } else {
@@ -444,6 +475,18 @@ mod tests {
 
         let cfg = client.read_scale_settings().await.unwrap();
         assert_eq!(cfg.version, "0001");
-        assert_eq!(client.write_keystroke(12, 1).await.unwrap(), "OK");
+        assert_eq!(client.print_test_report().await.unwrap(), "PRINT_OK");
+        assert_eq!(client.write_keystroke(12, 1).await.unwrap(), "KEY_OK");
+        assert_eq!(client.tap_keystroke(12).await.unwrap(), "KEY_OK");
+
+        // CommandError with a non-matching error code (02 != 57) must surface immediately as Protocol error
+        let err = client.write_keystroke(99, 1).await.unwrap_err();
+        match err {
+            DriverError::Protocol { code, message } => {
+                assert_eq!(code, Some(2));
+                assert!(message.contains("Invalid scan code"));
+            }
+            other => panic!("expected DriverError::Protocol, got {other:?}"),
+        }
     }
 }

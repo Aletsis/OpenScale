@@ -151,8 +151,16 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
 
   const handleTestPrint = async () => {
     try {
-      await invoke("xs_service_action", { host, port: null, action: "print_test" });
-      onStatus(`Test print command sent to ${host}.`);
+      const res = await invoke<string>("xs_service_action", {
+        host,
+        port: null,
+        action: "print_test",
+      });
+      onStatus(
+        res
+          ? `Test print command sent to ${host} (${res}).`
+          : `Test print command sent to ${host}.`,
+      );
     } catch (err) {
       onStatus(`Test print error: ${String(err)}`);
     }
@@ -273,7 +281,12 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
           <Button size="sm" disabled={!validation.valid} onClick={() => void handleSendToScale()}>
             <Send className="h-3.5 w-3.5" /> Send to Scale
           </Button>
-          <Button size="sm" variant="secondary" onClick={() => void handleTestPrint()}>
+          <Button
+            size="sm"
+            variant="secondary"
+            title="Print scale diagnostic test report (CMD 47)"
+            onClick={() => void handleTestPrint()}
+          >
             <Printer className="h-3.5 w-3.5" /> Test Print
           </Button>
         </div>

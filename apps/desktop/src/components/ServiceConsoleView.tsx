@@ -55,6 +55,7 @@ export function ServiceConsoleView({ scales, onStatus }: ServiceConsoleViewProps
   const [machineParams, setMachineParams] = useState<MachineParametersDto | null>(null);
   const [diagLog, setDiagLog] = useState<string[]>([]);
   const [scanCode, setScanCode] = useState("1");
+  const [keyMode, setKeyMode] = useState<"tap" | "down" | "up">("tap");
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [lcdFrame, setLcdFrame] = useState<LcdFrameDto | null>(null);
   const [liveWeight, setLiveWeight] = useState(false);
@@ -232,8 +233,14 @@ export function ServiceConsoleView({ scales, onStatus }: ServiceConsoleViewProps
               variant="outline"
               onClick={() =>
                 void runSafe(async () => {
-                  await invoke("xs_service_action", { host, port: null, action: "print_test" });
-                  onStatus("Test report sent to printer.");
+                  const res = await invoke<string>("xs_service_action", {
+                    host,
+                    port: null,
+                    action: "print_test",
+                  });
+                  onStatus(
+                    res ? `Test report sent to printer (${res}).` : "Test report sent to printer.",
+                  );
                 })
               }
             >
@@ -305,27 +312,47 @@ export function ServiceConsoleView({ scales, onStatus }: ServiceConsoleViewProps
             height={128}
             className="w-full max-w-[320px] rounded border border-border bg-lime-100"
           />
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <input
               type="number"
+              min={0}
+              max={255}
               value={scanCode}
               onChange={(ev) => setScanCode(ev.target.value)}
               className="w-24 rounded-md border border-border bg-background px-2 py-1"
               placeholder="ScanCode"
             />
+            <select
+              value={keyMode}
+              onChange={(ev) => setKeyMode(ev.target.value as "tap" | "down" | "up")}
+              className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+            >
+              <option value="tap">Tap (Down+Up)</option>
+              <option value="down">Down (1)</option>
+              <option value="up">Up (0)</option>
+            </select>
             <Button
               size="sm"
               variant="outline"
               onClick={() =>
                 void runSafe(async () => {
-                  const code = Number.parseInt(scanCode, 10) || 0;
-                  await invoke("xs_service_send_key", {
+                  const code = Number.parseInt(scanCode, 10);
+                  if (Number.isNaN(code) || code < 0 || code > 255) {
+                    onStatus("ScanCode must be an integer between 0 and 255.");
+                    return;
+                  }
+                  const keyState = keyMode === "tap" ? null : keyMode === "down" ? 1 : 0;
+                  const res = await invoke<string>("xs_service_send_key", {
                     host,
                     port: null,
                     scanCode: code,
-                    keyState: 1,
+                    keyState,
                   });
-                  onStatus(`Sent keystroke ${code}.`);
+                  onStatus(
+                    res
+                      ? `Sent keystroke ${code} (${keyMode}): ${res}`
+                      : `Sent keystroke ${code} (${keyMode}).`,
+                  );
                 })
               }
             >

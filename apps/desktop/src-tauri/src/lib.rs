@@ -10,7 +10,7 @@ use openscale_domain::{
     BarcodeFormat, Department, LabelFormat, Plu, PluKey, SalesSnapshot, Scale, ScaleSalesReport,
     StoredText, Tare, TaxRate,
 };
-use openscale_driver::{DiscoveredScale, LcdFrame, ScaleDriver};
+use openscale_driver::{DiscoveredScale, DriverError, LcdFrame, ScaleDriver};
 use openscale_driver_xs::{
     LabelFormatRecord, MachineParameters, ScaleSettings748, ServiceWeightReading, XS_SERVICE_PORT,
     XsDriver, XsDriverConfig, XsServiceClient,
@@ -33,7 +33,8 @@ macro_rules! run_service_op {
         let mut result: Result<_, String> = Err("XsServicePort session failed".to_string());
 
         for attempt in 0..2 {
-            if !sessions.contains_key(&key) {
+            let was_cached = sessions.contains_key(&key);
+            if !was_cached {
                 match XsServiceClient::connect(&host_trimmed, $port, Duration::from_secs(5)).await {
                     Ok(client) => {
                         sessions.insert(key.clone(), client);
@@ -52,9 +53,17 @@ macro_rules! run_service_op {
                     break;
                 }
                 Err(err) => {
-                    sessions.remove(&key);
-                    if attempt == 1 {
+                    let is_protocol_err = matches!(err, DriverError::Protocol { .. });
+                    let should_retry = was_cached
+                        && attempt == 0
+                        && matches!(err, DriverError::Io(_) | DriverError::ConnectionFailed(_));
+
+                    if !is_protocol_err {
+                        sessions.remove(&key);
+                    }
+                    if !should_retry {
                         result = Err(err.to_string());
+                        break;
                     }
                 }
             }
@@ -360,9 +369,12 @@ async fn xs_service_send_key(
     host: String,
     port: Option<u16>,
     scan_code: u8,
-    key_state: u8,
+    key_state: Option<u8>,
 ) -> Result<String, String> {
-    run_service_op!(state, host, port, |c| c.write_keystroke(scan_code, key_state))
+    match key_state {
+        Some(ks) => run_service_op!(state, host, port, |c| c.write_keystroke(scan_code, ks)),
+        None => run_service_op!(state, host, port, |c| c.tap_keystroke(scan_code)),
+    }
 }
 
 #[tauri::command]
