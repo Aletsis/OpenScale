@@ -149,7 +149,7 @@ pub fn parse_lcd_bitmap_reply(raw: &str) -> Result<LcdFrame, DriverError> {
 
     let hex_bytes: Vec<u8> = parts[2].bytes().filter(u8::is_ascii_hexdigit).collect();
     let mut bitmap = Vec::with_capacity(hex_bytes.len() / 2);
-    for pair in hex_bytes.chunks_exact(2) {
+    for pair in hex_bytes.as_chunks::<2>().0 {
         let s = std::str::from_utf8(pair).map_err(|_| DriverError::Protocol {
             code: None,
             message: "non-ASCII hex in LCD bitmap".to_string(),
