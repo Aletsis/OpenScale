@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { type PropsWithChildren, type ReactNode, useEffect, useId } from "react";
+import { createPortal } from "react-dom";
 
 import { cn } from "../lib/utils.js";
 import { Button } from "./button.js";
@@ -37,20 +38,25 @@ export function Dialog({
     if (!open) {
       return;
     }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         onClose();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, [open, onClose]);
 
   if (!open) {
     return null;
   }
 
-  return (
+  return createPortal(
     <div
       className="os-backdrop-enter fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4 backdrop-blur-[2px]"
       onMouseDown={(event) => {
@@ -98,7 +104,8 @@ export function Dialog({
           </div>
         )}
       </dialog>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

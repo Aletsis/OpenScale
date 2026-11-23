@@ -182,7 +182,7 @@ describe("@openscale/ui components", () => {
     const onClose = vi.fn();
     const onConfirm = vi.fn();
 
-    const { rerender } = render(
+    const { container, rerender } = render(
       <Dialog open={false} onClose={onClose} title="Hidden">
         Body
       </Dialog>,
@@ -194,8 +194,12 @@ describe("@openscale/ui components", () => {
         <div>Form content</div>
       </Dialog>,
     );
-    expect(screen.getByRole("dialog")).toHaveTextContent("Edit PLU");
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("Edit PLU");
     expect(screen.getByText("Update fields")).toBeInTheDocument();
+    expect(container).not.toContainElement(dialog);
+    expect(document.body).toContainElement(dialog);
+    expect(document.body.style.overflow).toBe("hidden");
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -213,6 +217,13 @@ describe("@openscale/ui components", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <Dialog open={false} onClose={onClose} title="Hidden">
+        Body
+      </Dialog>,
+    );
+    expect(document.body.style.overflow).toBe("");
   });
 
   it("provides OpenScaleTransport via OpenScaleProvider and throws outside provider", () => {
