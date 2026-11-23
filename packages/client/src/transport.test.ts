@@ -154,6 +154,36 @@ describe("HttpWsTransport", () => {
     expect(await transport.syncScale("scale-1", "delta")).toEqual(report);
   });
 
+  it("calls checkScaleHealth and checkAllScalesHealth endpoints", async () => {
+    const result = {
+      scale_id: "scale-1",
+      previous_status: "online" as const,
+      status: "offline" as const,
+      last_seen_at: "2026-11-23T22:00:00Z",
+      checked_at: "2026-11-23T22:01:00Z",
+      error: "Connection timed out",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJsonResponse(result))
+      .mockResolvedValueOnce(mockJsonResponse([result]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const transport = new HttpWsTransport({ baseUrl: "http://localhost:8080" });
+    expect(await transport.checkScaleHealth("scale-1")).toEqual(result);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8080/api/v1/scales/scale-1/health",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(await transport.checkAllScalesHealth()).toEqual([result]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8080/api/v1/scales/health",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("throws a descriptive error when API responds with non-OK status", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("Forbidden", { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);

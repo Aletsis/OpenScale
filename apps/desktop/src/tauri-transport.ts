@@ -6,6 +6,7 @@ import type {
   PluKey,
   Scale,
   ScaleEvent,
+  ScaleHealthCheckResult,
   ScaleImportApplyRequest,
   ScaleImportPreview,
   ScaleImportResult,
@@ -34,6 +35,14 @@ export class TauriIpcTransport implements OpenScaleTransport {
 
   deleteScale(scaleId: string): Promise<boolean> {
     return invoke<boolean>("delete_scale", { scaleId });
+  }
+
+  checkScaleHealth(scaleId: string): Promise<ScaleHealthCheckResult> {
+    return invoke<ScaleHealthCheckResult>("check_scale_health", { scaleId });
+  }
+
+  checkAllScalesHealth(): Promise<ScaleHealthCheckResult[]> {
+    return invoke<ScaleHealthCheckResult[]>("check_all_scales_health");
   }
 
   listPlus(): Promise<Plu[]> {

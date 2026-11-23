@@ -22,6 +22,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
+  Activity,
   BarChart3,
   Check,
   Database,
@@ -41,10 +42,12 @@ import {
   Sun,
   Trash2,
   Upload,
+  Wifi,
+  WifiOff,
   Wrench,
   X,
 } from "lucide-react";
-import { type FormEvent, useCallback, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { LabelDesignerView } from "./components/LabelDesignerView.js";
@@ -60,7 +63,7 @@ type Tab = "scales" | "catalog" | "masterTables" | "reports" | "service" | "labe
 interface SyncHistoryEntry {
   id: string;
   timestamp: string;
-  operation: "delta" | "full" | "import" | "discover";
+  operation: "delta" | "full" | "import" | "discover" | "connection";
   target: string;
   status: "success" | "warning" | "error";
   details: string;
@@ -181,6 +184,11 @@ export function App() {
     [scales],
   );
 
+  const offlineScalesCount = useMemo(
+    () => scales.filter((scale) => scale.status === "offline" || scale.status === "error").length,
+    [scales],
+  );
+
   const filteredPlus = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) {
@@ -216,6 +224,96 @@ export function App() {
     const found = scales.find((s) => s.id === scaleId);
     return found ? `${found.name} (${found.ip_address})` : scaleId;
   };
+
+  useEffect(() => {
+    return transport.subscribe((event) => {
+      if (event.type !== "connection_changed") {
+        return;
+      }
+
+      const nextStatus: Scale["status"] | null =
+        event.state === "connected"
+          ? "online"
+          : event.state === "disconnected"
+            ? "offline"
+            : event.state === "error"
+              ? "error"
+              : null;
+
+      if (!nextStatus) {
+        return;
+      }
+
+      const currentScales = queryClient.getQueryData<Scale[]>(["scales"]) ?? [];
+      const targetScale = currentScales.find((item) => item.id === event.scale_id);
+      const nowIso = new Date().toISOString();
+
+      queryClient.setQueryData<Scale[]>(["scales"], (prev) =>
+        prev?.map((item) =>
+          item.id === event.scale_id
+            ? {
+                ...item,
+                status: nextStatus,
+                last_seen_at: nextStatus === "online" ? nowIso : item.last_seen_at,
+              }
+            : item,
+        ),
+      );
+      void queryClient.invalidateQueries({ queryKey: ["scales"] });
+
+      if (!targetScale) {
+        return;
+      }
+
+      const isNowOffline = nextStatus === "offline" || nextStatus === "error";
+      const wasOffline = targetScale.status === "offline" || targetScale.status === "error";
+
+      if (isNowOffline && !wasOffline) {
+        const message = t("notifications.scaleOffline", {
+          name: targetScale.name,
+          ip: targetScale.ip_address,
+        });
+        toast({ variant: "error", message });
+        appendHistory({
+          operation: "connection",
+          target: `${targetScale.name} (${targetScale.ip_address})`,
+          status: "error",
+          details: event.message ? `${message} — ${event.message}` : message,
+        });
+      } else if (nextStatus === "online" && wasOffline) {
+        const message = t("notifications.scaleOnline", {
+          name: targetScale.name,
+          ip: targetScale.ip_address,
+        });
+        toast({ variant: "success", message });
+        appendHistory({
+          operation: "connection",
+          target: `${targetScale.name} (${targetScale.ip_address})`,
+          status: "success",
+          details: message,
+        });
+      }
+    });
+  }, [appendHistory, queryClient, t, toast, transport]);
+
+  const checkHealthMutation = useMutation({
+    mutationFn: () => transport.checkAllScalesHealth(),
+    onSuccess: async (results) => {
+      await queryClient.invalidateQueries({ queryKey: ["scales"] });
+      const online = results.filter((item) => item.status === "online").length;
+      const offline = results.length - online;
+      toast({
+        variant: offline > 0 ? "warning" : "success",
+        message: t("notifications.healthCheckDone", { online, offline }),
+      });
+    },
+    onError: (err) => {
+      toast({
+        variant: "error",
+        message: t("notifications.error", { message: String(err) }),
+      });
+    },
+  });
 
   const discoverMutation = useMutation({
     mutationFn: () => transport.discoverScales(),
@@ -666,8 +764,44 @@ export function App() {
       header: t("scales.columns.status"),
       cell: ({ getValue }) => {
         const status = getValue<Scale["status"]>();
-        const variant = status === "online" ? "success" : status === "error" ? "danger" : "default";
-        return <Badge variant={variant}>{t(`scales.status.${status}`)}</Badge>;
+        const variant =
+          status === "online"
+            ? "success"
+            : status === "offline" || status === "error"
+              ? "danger"
+              : status === "syncing"
+                ? "warning"
+                : "default";
+        return (
+          <Badge variant={variant} className="gap-1.5">
+            {status === "online" && <Wifi className="h-3 w-3" />}
+            {(status === "offline" || status === "error") && <WifiOff className="h-3 w-3" />}
+            {t(`scales.status.${status}`)}
+          </Badge>
+        );
+      },
+    },
+    {
+      accessorKey: "last_seen_at",
+      header: t("scales.columns.lastSeen"),
+      cell: ({ getValue }) => {
+        const raw = getValue<string | null>();
+        if (!raw) {
+          return <span className="text-xs text-muted-foreground">{t("scales.neverSeen")}</span>;
+        }
+        const date = new Date(raw);
+        return (
+          <span
+            className="font-mono text-xs text-muted-foreground tabular-nums"
+            title={date.toLocaleString()}
+          >
+            {date.toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })}
+          </span>
+        );
       },
     },
     {
@@ -931,14 +1065,22 @@ export function App() {
               <ScaleIcon className="h-4 w-4" />
               {t("nav.scales")}
             </span>
-            <span
-              className={
-                activeTab === "scales"
-                  ? "rounded-full bg-primary-foreground/20 px-2 py-0.5 text-[11px] font-semibold tabular-nums"
-                  : "rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground tabular-nums"
-              }
-            >
-              {scales.length}
+            <span className="flex items-center gap-1.5">
+              {offlineScalesCount > 0 && (
+                <span
+                  className="inline-flex h-2 w-2 rounded-full bg-destructive"
+                  title={`${offlineScalesCount} ${t("scales.stats.offline").toLowerCase()}`}
+                />
+              )}
+              <span
+                className={
+                  activeTab === "scales"
+                    ? "rounded-full bg-primary-foreground/20 px-2 py-0.5 text-[11px] font-semibold tabular-nums"
+                    : "rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground tabular-nums"
+                }
+              >
+                {scales.length}
+              </span>
             </span>
           </Button>
           <Button
@@ -1093,19 +1235,43 @@ export function App() {
           {activeTab === "scales" && (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-xl font-semibold tracking-tight">{t("nav.scales")}</h2>
-                <Button
-                  onClick={() => discoverMutation.mutate()}
-                  disabled={discoverMutation.isPending}
-                >
-                  <Radar
-                    className={discoverMutation.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"}
-                  />
-                  {discoverMutation.isPending ? t("scales.discovering") : t("scales.discover")}
-                </Button>
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-xl font-semibold tracking-tight">{t("nav.scales")}</h2>
+                  {scales.length > 0 && (
+                    <Badge variant="success" className="gap-1.5 font-normal">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                      {t("scales.monitoringActive")}
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => checkHealthMutation.mutate()}
+                    disabled={scales.length === 0 || checkHealthMutation.isPending}
+                  >
+                    <Activity
+                      className={
+                        checkHealthMutation.isPending ? "h-4 w-4 animate-pulse" : "h-4 w-4"
+                      }
+                    />
+                    {checkHealthMutation.isPending
+                      ? t("scales.checkingStatus")
+                      : t("scales.checkStatus")}
+                  </Button>
+                  <Button
+                    onClick={() => discoverMutation.mutate()}
+                    disabled={discoverMutation.isPending}
+                  >
+                    <Radar
+                      className={discoverMutation.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"}
+                    />
+                    {discoverMutation.isPending ? t("scales.discovering") : t("scales.discover")}
+                  </Button>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-lg border border-border bg-card px-4 py-3 shadow-xs">
                   <p className="text-xs font-medium text-muted-foreground">
                     {t("scales.stats.registered")}
@@ -1118,6 +1284,20 @@ export function App() {
                   </p>
                   <p className="mt-1 text-2xl font-bold text-emerald-600 tabular-nums dark:text-emerald-400">
                     {onlineScalesCount}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border bg-card px-4 py-3 shadow-xs">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {t("scales.stats.offline")}
+                  </p>
+                  <p
+                    className={
+                      offlineScalesCount > 0
+                        ? "mt-1 text-2xl font-bold text-destructive tabular-nums"
+                        : "mt-1 text-2xl font-bold text-muted-foreground tabular-nums"
+                    }
+                  >
+                    {offlineScalesCount}
                   </p>
                 </div>
                 <div className="rounded-lg border border-border bg-card px-4 py-3 shadow-xs">

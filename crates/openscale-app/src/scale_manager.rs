@@ -22,6 +22,7 @@ enum ScaleCommand {
     Connect(oneshot::Sender<Result<ScaleInfo, DriverError>>),
     Disconnect(oneshot::Sender<Result<(), DriverError>>),
     Ping(oneshot::Sender<Result<(), DriverError>>),
+    HealthCheck(oneshot::Sender<Result<(), DriverError>>),
     GetDateTime(oneshot::Sender<Result<ScaleDateTime, DriverError>>),
     SetDateTime(ScaleDateTime, oneshot::Sender<Result<(), DriverError>>),
     ReadPlu(PluKey, oneshot::Sender<Result<Option<Plu>, DriverError>>),
@@ -94,6 +95,16 @@ impl ScaleHandle {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(ScaleCommand::Ping(tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    /// Verifies live network reachability by pinging an active session or reconnecting if needed.
+    pub async fn health_check(&self) -> Result<(), AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::HealthCheck(tx))
             .await
             .map_err(|_| AppError::ActorUnavailable)?;
         Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
@@ -331,6 +342,19 @@ impl ScaleManager {
         self.events.subscribe()
     }
 
+    pub fn emit_connection_changed(
+        &self,
+        scale_id: Uuid,
+        state: ConnectionState,
+        message: Option<String>,
+    ) {
+        let _ = self.events.send(ScaleEvent::ConnectionChanged {
+            scale_id,
+            state,
+            message,
+        });
+    }
+
     /// Registers a scale using its protocol family's real TCP driver (`XS` or `XTi`).
     pub async fn register_scale(&self, scale: &Scale) -> ScaleHandle {
         let driver: Box<dyn ScaleDriver> = match scale.family {
@@ -425,6 +449,19 @@ async fn run_scale_actor(
             }
             ScaleCommand::Ping(reply) => {
                 let _ = reply.send(driver.ping().await);
+            }
+            ScaleCommand::HealthCheck(reply) => {
+                let res = match driver.ping().await {
+                    Ok(()) => Ok(()),
+                    Err(
+                        DriverError::NotConnected
+                        | DriverError::Io(_)
+                        | DriverError::Timeout
+                        | DriverError::ConnectionFailed(_),
+                    ) => driver.connect().await.map(|_| ()),
+                    Err(err) => Err(err),
+                };
+                let _ = reply.send(res);
             }
             ScaleCommand::GetDateTime(reply) => {
                 let _ = reply.send(driver.get_datetime().await);

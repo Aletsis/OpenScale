@@ -117,6 +117,15 @@ export type ScaleEvent =
       weight: LiveWeight;
     };
 
+export interface ScaleHealthCheckResult {
+  scale_id: string;
+  previous_status: ScaleStatus;
+  status: ScaleStatus;
+  last_seen_at: string | null;
+  checked_at: string;
+  error: string | null;
+}
+
 export type SyncMode = "delta" | "full";
 
 export interface SyncReport {

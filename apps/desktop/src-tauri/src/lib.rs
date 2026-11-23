@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openscale_app::{
-    ImportSelection, OpenScaleApp, ScaleImportApplyRequest, ScaleImportPreview, ScaleImportResult,
-    SyncMode, SyncReport,
+    DEFAULT_HEALTH_CHECK_INTERVAL, ImportSelection, OpenScaleApp, ScaleHealthCheckResult,
+    ScaleImportApplyRequest, ScaleImportPreview, ScaleImportResult, SyncMode, SyncReport,
 };
 use openscale_domain::{
     BarcodeFormat, Department, LabelFormat, Plu, PluKey, SalesSnapshot, Scale, ScaleSalesReport,
@@ -100,6 +100,29 @@ async fn delete_scale(state: State<'_, DesktopState>, scale_id: Uuid) -> Result<
     state
         .app
         .delete_scale(scale_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn check_scale_health(
+    state: State<'_, DesktopState>,
+    scale_id: Uuid,
+) -> Result<ScaleHealthCheckResult, String> {
+    state
+        .app
+        .check_scale_health(scale_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn check_all_scales_health(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<ScaleHealthCheckResult>, String> {
+    state
+        .app
+        .check_all_scales_health()
         .await
         .map_err(|e| e.to_string())
 }
@@ -519,6 +542,14 @@ pub fn run() {
                 }
             });
 
+            // Start periodic background connectivity monitor for all registered scales
+            let monitor_app = core.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = monitor_app
+                    .start_health_monitor(DEFAULT_HEALTH_CHECK_INTERVAL)
+                    .await;
+            });
+
             app.manage(DesktopState {
                 app: core,
                 service_sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -530,6 +561,8 @@ pub fn run() {
             list_scales,
             upsert_scale,
             delete_scale,
+            check_scale_health,
+            check_all_scales_health,
             list_plus,
             get_plu,
             upsert_plu,

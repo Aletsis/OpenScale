@@ -89,6 +89,59 @@ impl ScaleRepository {
         rows.into_iter().map(row_to_scale).collect()
     }
 
+    pub async fn get_by_id(
+        &self,
+        store_id: Uuid,
+        scale_id: Uuid,
+    ) -> Result<Option<Scale>, StorageError> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                id, store_id, group_id, name, family, ip_address, data_port, service_port,
+                serial_number, model, firmware_version, mac_address, status, last_seen_at,
+                sync_version, updated_at, deleted_at
+            FROM scales
+            WHERE store_id = ? AND id = ? AND deleted_at IS NULL
+            "#,
+        )
+        .bind(store_id.to_string())
+        .bind(scale_id.to_string())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(row_to_scale).transpose()
+    }
+
+    pub async fn update_status(
+        &self,
+        store_id: Uuid,
+        scale_id: Uuid,
+        status: ScaleStatus,
+        last_seen_at: Option<DateTime<Utc>>,
+    ) -> Result<bool, StorageError> {
+        let now = Utc::now().to_rfc3339();
+        let status_str = status_to_str(status);
+        let last_seen_str = last_seen_at.map(|dt| dt.to_rfc3339());
+        let res = sqlx::query(
+            r#"
+            UPDATE scales
+            SET status = ?,
+                last_seen_at = COALESCE(?, last_seen_at),
+                updated_at = ?
+            WHERE store_id = ? AND id = ? AND deleted_at IS NULL
+            "#,
+        )
+        .bind(status_str)
+        .bind(last_seen_str)
+        .bind(&now)
+        .bind(store_id.to_string())
+        .bind(scale_id.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(res.rows_affected() > 0)
+    }
+
     pub async fn soft_delete(&self, store_id: Uuid, scale_id: Uuid) -> Result<bool, StorageError> {
         let now = Utc::now().to_rfc3339();
         let res = sqlx::query(
@@ -243,5 +296,64 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[tokio::test]
+    async fn scale_update_status_preserves_last_seen_when_offline() {
+        let db = Database::connect_in_memory().await.unwrap();
+        let repo = ScaleRepository::new(db.pool().clone());
+
+        let initial_seen = Utc::now() - chrono::Duration::minutes(5);
+        let scale = Scale {
+            id: new_id(),
+            group_id: None,
+            name: "Carnicería 01".to_string(),
+            family: ScaleFamily::AveryBerkelXs,
+            ip_address: "192.168.9.113".to_string(),
+            data_port: 3001,
+            service_port: Some(28822),
+            serial_number: None,
+            model: Some("XS200".to_string()),
+            firmware_version: None,
+            mac_address: None,
+            status: ScaleStatus::Online,
+            last_seen_at: Some(initial_seen),
+            meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+        };
+        repo.upsert(&scale).await.unwrap();
+
+        // Transition to Offline without overwriting last_seen_at
+        assert!(
+            repo.update_status(DEFAULT_LOCAL_STORE_ID, scale.id, ScaleStatus::Offline, None)
+                .await
+                .unwrap()
+        );
+        let offline = repo
+            .get_by_id(DEFAULT_LOCAL_STORE_ID, scale.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(offline.status, ScaleStatus::Offline);
+        assert_eq!(offline.last_seen_at, Some(initial_seen));
+
+        // Recover to Online with a fresh timestamp
+        let recovered_seen = Utc::now();
+        assert!(
+            repo.update_status(
+                DEFAULT_LOCAL_STORE_ID,
+                scale.id,
+                ScaleStatus::Online,
+                Some(recovered_seen),
+            )
+            .await
+            .unwrap()
+        );
+        let online = repo
+            .get_by_id(DEFAULT_LOCAL_STORE_ID, scale.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(online.status, ScaleStatus::Online);
+        assert_eq!(online.last_seen_at, Some(recovered_seen));
     }
 }

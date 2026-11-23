@@ -16,6 +16,11 @@ use uuid::Uuid;
 
 use crate::discovery::discover_all_scales;
 use crate::error::AppError;
+use crate::health_monitor::{
+    ScaleHealthCheckResult, check_all_scales_health as check_all_scales_health_impl,
+    check_scale_health as check_scale_health_impl,
+    start_health_monitor as start_health_monitor_impl,
+};
 use crate::import_engine::{
     ImportSelection, ScaleImportApplyRequest, ScaleImportPreview, ScaleImportResult,
     apply_scale_import as apply_scale_import_impl,
@@ -91,6 +96,21 @@ impl OpenScaleApp {
             self.scales.unregister(scale_id).await;
         }
         Ok(deleted)
+    }
+
+    pub async fn check_scale_health(
+        &self,
+        scale_id: Uuid,
+    ) -> Result<ScaleHealthCheckResult, AppError> {
+        check_scale_health_impl(self, scale_id).await
+    }
+
+    pub async fn check_all_scales_health(&self) -> Result<Vec<ScaleHealthCheckResult>, AppError> {
+        check_all_scales_health_impl(self).await
+    }
+
+    pub fn start_health_monitor(&self, interval: Duration) -> tokio::task::JoinHandle<()> {
+        start_health_monitor_impl(self.clone(), interval)
     }
 
     pub async fn list_plus(&self) -> Result<Vec<Plu>, AppError> {

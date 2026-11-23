@@ -5,6 +5,7 @@ import type {
   PluKey,
   Scale,
   ScaleEvent,
+  ScaleHealthCheckResult,
   ScaleImportApplyRequest,
   ScaleImportPreview,
   ScaleImportResult,
@@ -25,6 +26,8 @@ export interface OpenScaleTransport {
   listScales(): Promise<Scale[]>;
   upsertScale(scale: Scale): Promise<Scale>;
   deleteScale(scaleId: string): Promise<boolean>;
+  checkScaleHealth(scaleId: string): Promise<ScaleHealthCheckResult>;
+  checkAllScalesHealth(): Promise<ScaleHealthCheckResult[]>;
 
   // Master PLU Catalog
   listPlus(): Promise<Plu[]>;
@@ -102,6 +105,21 @@ export class HttpWsTransport implements OpenScaleTransport {
       method: "DELETE",
     });
     return true;
+  }
+
+  checkScaleHealth(scaleId: string): Promise<ScaleHealthCheckResult> {
+    return this.request<ScaleHealthCheckResult>(
+      `/api/v1/scales/${encodeURIComponent(scaleId)}/health`,
+      {
+        method: "POST",
+      },
+    );
+  }
+
+  checkAllScalesHealth(): Promise<ScaleHealthCheckResult[]> {
+    return this.request<ScaleHealthCheckResult[]>("/api/v1/scales/health", {
+      method: "POST",
+    });
   }
 
   listPlus(): Promise<Plu[]> {

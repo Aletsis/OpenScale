@@ -15,6 +15,10 @@
   "scales": {
     "discover": "Discover Scales",
     "discovering": "Scanning network...",
+    "checkStatus": "Check Connection",
+    "checkingStatus": "Checking...",
+    "monitoringActive": "Live monitoring",
+    "neverSeen": "Never",
     "registered": "Registered Scales",
     "lanDiscovery": "New Scales on LAN",
     "importCatalog": "Import PLUs",
@@ -28,6 +32,7 @@
     "stats": {
       "registered": "Registered",
       "online": "Online",
+      "offline": "Offline",
       "discovered": "New on LAN"
     },
     "columns": {
@@ -37,7 +42,8 @@
       "port": "Port",
       "model": "Model",
       "firmware": "Firmware",
-      "status": "Status"
+      "status": "Status",
+      "lastSeen": "Last Seen"
     },
     "status": {
       "online": "Online",
@@ -190,7 +196,8 @@
       "delta": "Delta Sync",
       "full": "Full Sync",
       "import": "Import PLUs",
-      "discover": "LAN Discovery"
+      "discover": "LAN Discovery",
+      "connection": "Connection"
     },
     "status": {
       "success": "Success",
@@ -206,6 +213,9 @@
     "scaleSaved": "Scale {{name}} ({{ip}}) saved.",
     "scaleUpdated": "Scale {{name}} ({{ip}}) updated.",
     "scaleDeleted": "Scale {{name}} ({{ip}}) deleted.",
+    "scaleOffline": "Scale {{name}} ({{ip}}) lost network connection.",
+    "scaleOnline": "Scale {{name}} ({{ip}}) is back online.",
+    "healthCheckDone": "Health check complete: {{online}} online, {{offline}} offline.",
     "importedFromScale": "Imported {{count}} PLU(s) from scale into local catalog.",
     "scaleImportSummary": "Import complete: {{imported}} record(s) saved, {{keptLocal}} conflict(s) kept local, {{unchanged}} unchanged.",
     "scaleImportEmpty": "No new records to import ({{unchanged}} unchanged).",

@@ -15,6 +15,10 @@
   "scales": {
     "discover": "Descubrir Básculas",
     "discovering": "Escaneando red...",
+    "checkStatus": "Verificar conexión",
+    "checkingStatus": "Verificando...",
+    "monitoringActive": "Monitoreo en vivo",
+    "neverSeen": "Nunca",
     "registered": "Básculas Registradas",
     "lanDiscovery": "Nuevas Básculas en LAN",
     "importCatalog": "Importar PLUs",
@@ -28,6 +32,7 @@
     "stats": {
       "registered": "Registradas",
       "online": "En línea",
+      "offline": "Sin conexión",
       "discovered": "Nuevas en LAN"
     },
     "columns": {
@@ -37,7 +42,8 @@
       "port": "Puerto",
       "model": "Modelo",
       "firmware": "Firmware",
-      "status": "Estado"
+      "status": "Estado",
+      "lastSeen": "Última conexión"
     },
     "status": {
       "online": "En línea",
@@ -190,7 +196,8 @@
       "delta": "Delta Sync",
       "full": "Full Sync",
       "import": "Importar PLUs",
-      "discover": "Descubrimiento LAN"
+      "discover": "Descubrimiento LAN",
+      "connection": "Conexión"
     },
     "status": {
       "success": "Exitoso",
@@ -206,6 +213,9 @@
     "scaleSaved": "Báscula {{name}} ({{ip}}) guardada.",
     "scaleUpdated": "Báscula {{name}} ({{ip}}) actualizada.",
     "scaleDeleted": "Báscula {{name}} ({{ip}}) eliminada.",
+    "scaleOffline": "Báscula {{name}} ({{ip}}) perdió conexión a la red.",
+    "scaleOnline": "Báscula {{name}} ({{ip}}) recuperó conexión a la red.",
+    "healthCheckDone": "Verificación completada: {{online}} en línea, {{offline}} sin conexión.",
     "importedFromScale": "Se importaron {{count}} PLU(s) desde la báscula al catálogo local.",
     "scaleImportSummary": "Importación completada: {{imported}} registro(s) guardado(s), {{keptLocal}} conflicto(s) conservado(s) localmente, {{unchanged}} sin cambios.",
     "scaleImportEmpty": "No se encontraron nuevos registros para importar ({{unchanged}} sin cambios).",

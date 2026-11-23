@@ -734,3 +734,209 @@ async fn delete_scale_soft_deletes_and_unregisters_actor() {
     assert!(app.list_scales().await.unwrap().is_empty());
     assert!(app.scales.get(scale_id).await.is_err());
 }
+
+struct FlakyScaleDriver {
+    reachable: Arc<std::sync::atomic::AtomicBool>,
+    connected: bool,
+}
+
+#[async_trait]
+impl ScaleDriver for FlakyScaleDriver {
+    fn capabilities(&self) -> DriverCapabilities {
+        DriverCapabilities::xs_default()
+    }
+
+    async fn connect(&mut self) -> Result<ScaleInfo, DriverError> {
+        if self.reachable.load(std::sync::atomic::Ordering::SeqCst) {
+            self.connected = true;
+            Ok(ScaleInfo {
+                family: ScaleFamily::AveryBerkelXs,
+                model: "XS200".to_string(),
+                serial_number: None,
+                firmware_version: "4.1.7.0".to_string(),
+                protocol_version: None,
+                mac_address: None,
+                requires_auth: false,
+            })
+        } else {
+            self.connected = false;
+            Err(DriverError::ConnectionFailed(
+                "192.168.9.150:3001: host unreachable".to_string(),
+            ))
+        }
+    }
+
+    async fn disconnect(&mut self) -> Result<(), DriverError> {
+        self.connected = false;
+        Ok(())
+    }
+
+    async fn ping(&mut self) -> Result<(), DriverError> {
+        if !self.connected {
+            return Err(DriverError::NotConnected);
+        }
+        if self.reachable.load(std::sync::atomic::Ordering::SeqCst) {
+            Ok(())
+        } else {
+            self.connected = false;
+            Err(DriverError::Timeout)
+        }
+    }
+
+    async fn get_info(&mut self) -> Result<ScaleInfo, DriverError> {
+        self.connect().await
+    }
+
+    async fn get_datetime(&mut self) -> Result<ScaleDateTime, DriverError> {
+        Err(DriverError::Unsupported("get_datetime"))
+    }
+
+    async fn set_datetime(&mut self, _dt: ScaleDateTime) -> Result<(), DriverError> {
+        Err(DriverError::Unsupported("set_datetime"))
+    }
+
+    async fn read_plu(&mut self, _key: PluKey) -> Result<Option<Plu>, DriverError> {
+        Ok(None)
+    }
+
+    async fn list_plus(
+        &mut self,
+        _from: Option<PluKey>,
+        _to: Option<PluKey>,
+    ) -> Result<Vec<Plu>, DriverError> {
+        Ok(vec![])
+    }
+
+    async fn count_plus(&mut self) -> Result<u64, DriverError> {
+        Ok(0)
+    }
+
+    async fn upsert_plu(&mut self, _plu: &Plu) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn change_price(
+        &mut self,
+        _key: PluKey,
+        _price_1: MoneyCents,
+        _price_2: Option<MoneyCents>,
+        _price_3: Option<MoneyCents>,
+    ) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn delete_plu(&mut self, _key: PluKey) -> Result<(), DriverError> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn health_monitor_detects_disconnect_and_recovery_transitions() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let db = Database::connect_in_memory().await.unwrap();
+    let app = OpenScaleApp::new(db);
+
+    let scale_id = new_id();
+    let scale = Scale {
+        id: scale_id,
+        group_id: None,
+        name: "Báscula Monitor".to_string(),
+        family: ScaleFamily::AveryBerkelXs,
+        ip_address: "192.168.9.150".to_string(),
+        data_port: 3001,
+        service_port: Some(28822),
+        serial_number: None,
+        model: Some("XS200".to_string()),
+        firmware_version: None,
+        mac_address: None,
+        status: ScaleStatus::Unknown,
+        last_seen_at: None,
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    };
+    app.scale_repo().upsert(&scale).await.unwrap();
+
+    let reachable = Arc::new(AtomicBool::new(true));
+    app.scales
+        .register_driver(
+            scale_id,
+            Box::new(FlakyScaleDriver {
+                reachable: Arc::clone(&reachable),
+                connected: false,
+            }),
+        )
+        .await;
+
+    let mut events = app.scales.subscribe();
+
+    // 1. Initial check: Unknown -> Online
+    let res1 = app.check_scale_health(scale_id).await.unwrap();
+    assert_eq!(res1.previous_status, ScaleStatus::Unknown);
+    assert_eq!(res1.status, ScaleStatus::Online);
+    assert!(res1.last_seen_at.is_some());
+    assert!(res1.error.is_none());
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        ScaleEvent::ConnectionChanged {
+            scale_id: id,
+            state: ConnectionState::Connected,
+            message: None,
+        } if id == scale_id
+    ));
+
+    // 2. Repeated healthy check: stays Online, no duplicate event emitted
+    let res2 = app.check_scale_health(scale_id).await.unwrap();
+    assert_eq!(res2.previous_status, ScaleStatus::Online);
+    assert_eq!(res2.status, ScaleStatus::Online);
+    assert!(events.try_recv().is_err());
+
+    let seen_before_drop = res2.last_seen_at;
+
+    // 3. Scale loses network connection: Online -> Offline
+    reachable.store(false, Ordering::SeqCst);
+    let res3 = app.check_scale_health(scale_id).await.unwrap();
+    assert_eq!(res3.previous_status, ScaleStatus::Online);
+    assert_eq!(res3.status, ScaleStatus::Offline);
+    assert_eq!(res3.last_seen_at, seen_before_drop);
+    assert!(res3.error.is_some());
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        ScaleEvent::ConnectionChanged {
+            scale_id: id,
+            state: ConnectionState::Disconnected,
+            message: Some(_),
+        } if id == scale_id
+    ));
+
+    // Persisted in SQLite as Offline while preserving last_seen_at
+    let persisted_offline = app
+        .scale_repo()
+        .get_by_id(DEFAULT_LOCAL_STORE_ID, scale_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(persisted_offline.status, ScaleStatus::Offline);
+    assert_eq!(persisted_offline.last_seen_at, seen_before_drop);
+
+    // 4. Repeated offline check: stays Offline, no duplicate event emitted
+    let res4 = app.check_scale_health(scale_id).await.unwrap();
+    assert_eq!(res4.status, ScaleStatus::Offline);
+    assert!(events.try_recv().is_err());
+
+    // 5. Scale recovers network connection via check_all_scales_health: Offline -> Online
+    reachable.store(true, Ordering::SeqCst);
+    let all_results = app.check_all_scales_health().await.unwrap();
+    assert_eq!(all_results.len(), 1);
+    assert_eq!(all_results[0].previous_status, ScaleStatus::Offline);
+    assert_eq!(all_results[0].status, ScaleStatus::Online);
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        ScaleEvent::ConnectionChanged {
+            scale_id: id,
+            state: ConnectionState::Connected,
+            message: None,
+        } if id == scale_id
+    ));
+
+    app.scales.unregister(scale_id).await;
+}
