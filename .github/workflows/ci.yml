@@ -106,6 +106,9 @@ jobs:
     concurrency:
       group: cd-release
       cancel-in-progress: false
+    outputs:
+      should_release: ${{ steps.semver.outputs.should_release }}
+      release_tag: ${{ steps.semver.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -149,3 +152,93 @@ jobs:
               --title "${RELEASE_TAG}" \
               --generate-notes
           fi
+
+  publish-binaries:
+    name: Build & Publish Desktop (${{ matrix.name }})
+    needs: [release]
+    if: needs.release.outputs.should_release == 'true'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            tauri_args: ""
+          - name: Linux x64
+            os: ubuntu-22.04
+            tauri_args: ""
+          - name: macOS Universal
+            os: macos-latest
+            tauri_args: "--target universal-apple-darwin"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.release_tag }}
+
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            libssl-dev \
+            libgtk-3-dev \
+            libfuse2
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "apps/desktop/src-tauri -> target"
+
+      - name: Install dependencies and build workspace packages
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build Tauri desktop bundles
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+        run: pnpm --filter @openscale/desktop tauri build ${{ matrix.tauri_args }}
+
+      - name: Upload release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          ASSETS=()
+          while IFS= read -r file; do
+            ASSETS+=("$file")
+          done < <(find apps/desktop/src-tauri/target -type f \( \
+            -path "*/release/bundle/nsis/*.exe" -o \
+            -path "*/release/bundle/msi/*.msi" -o \
+            -path "*/release/bundle/deb/*.deb" -o \
+            -path "*/release/bundle/rpm/*.rpm" -o \
+            -path "*/release/bundle/appimage/*.AppImage" -o \
+            -path "*/release/bundle/dmg/*.dmg" \
+          \))
+          if [ ${#ASSETS[@]} -eq 0 ]; then
+            echo "No release bundles found!"
+            exit 1
+          fi
+          echo "Uploading assets for ${RELEASE_TAG}:"
+          printf '  - %s\n' "${ASSETS[@]}"
+          gh release upload "${RELEASE_TAG}" "${ASSETS[@]}" --clobber
