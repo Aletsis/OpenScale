@@ -1,6 +1,6 @@
 # Protocolo de Comunicación Avery Berkel — Serie XTi (`XtraDataPort` / `XTRA`)
 
-> **Estado:** Especificación extraída y verificada a nivel de bytecode/binarios oficiales (`ScaleDriver.jar`, `MxiComponents.jar`, `DataValidator.jar`, `xtra.dll`, `XMP5.3.0.0.DRI`) y probada con servidor mock TCP local. Pendiente validación final contra una báscula XTi física en red.  
+> **Estado:** **Validado en vivo** contra báscula física **Avery Berkel XTi200** (`192.168.9.115:3002`, Serie `23280318`, Firmware `5.1.4.270`, `ABR30-000413`, Schema `5.1.0.0`, lectura de **740 PLUs** en ~3.3 s).  
 > **Aplica a:** `XT Series` (**XTi**, `XTs`, `XTx`), `XTB Series` y `XM Series` (todas comparten la familia `XTRA`).
 
 ---
@@ -57,8 +57,9 @@ Ejemplo de estructura XML procesada por `XtraDataPortDriver.readBanner()` y `xtr
 </Banner>
 ```
 
-- **`FirmwareNumber` conocidos:** `"ABR30-000341"` = **XT / XTi Series**; `"ABR30-000413"` = **XTB Series**.
-- **`Authenticate`:** Por defecto `"No"`. Si una báscula XTi tiene habilitada seguridad de acceso en red (`"Yes"`), requerirá flujo de autenticación antes de aceptar comandos de escritura.
+- **`FirmwareNumber` conocidos:** `"ABR30-000341"` = **XT / XTi Series**; `"ABR30-000413"` = **XTi200 / XTB Series** (validado en `192.168.9.115`, donde el tag raíz del banner es `<Response>`, incluye `<Field name="Model">XTi</Field>` + `<Field name="ModelNumber">200</Field>` y `<Field name="Authenticate">0</Field>`).
+- **`Authenticate`:** `"0"` o `"No"` cuando está desactivada. Si una báscula XTi tiene habilitada seguridad de acceso en red (`"1"` / `"Yes"`), requerirá flujo de autenticación antes de aceptar comandos de escritura.
+- **Nota validada sobre `PING:READ`:** En firmware `5.1.4.270`, el servidor `XtraDataPort` ejecuta `select * from "<TABLE_ID>" order by 1;` directamente sobre SQLite y devuelve `STATUS=8` (`no such table: PING`). Para hacer *health check* / ping ligero compatible con todos los firmwares, usar `TABLE_ID="PLU"`, `ACTION_ID="READ"`, `SQLW="1=0"` (cero filas transferidas).
 
 ---
 

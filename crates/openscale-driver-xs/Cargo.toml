@@ -1,0 +1,20 @@
+[package]
+name = "openscale-driver-xs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Avery Berkel XS / M-Series protocol driver (TCP 3001, UDP 23452) for OpenScale."
+
+[dependencies]
+async-trait.workspace = true
+bytes.workspace = true
+encoding_rs.workspace = true
+openscale-domain = { path = "../openscale-domain" }
+openscale-driver = { path = "../openscale-driver" }
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

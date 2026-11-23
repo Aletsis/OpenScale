@@ -1,0 +1,616 @@
+use std::time::Duration;
+
+use async_trait::async_trait;
+use openscale_domain::types::{XS_MAX_DID, XS_MAX_PLU_NUMBER};
+use openscale_domain::{MoneyCents, Plu, PluKey, ScaleFamily};
+use openscale_driver::{DriverCapabilities, DriverError, ScaleDateTime, ScaleDriver, ScaleInfo};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use uuid::Uuid;
+
+use crate::codec::{
+    decode_asset_info, decode_datetime, decode_mach_net_config, decode_plu_read,
+    decode_version_details, encode_change_price, encode_datetime, encode_plu_search_header,
+    encode_plu_write,
+};
+use crate::protocol::{
+    ACTION_CLEAR, ACTION_REQUEST, ACTION_UPDATE, AbCmdHeader, CMD_ASSETINFO, CMD_CHANGE_PRICE,
+    CMD_DATE_AND_TIME, CMD_MACHNETCONFIG, CMD_PLU_RECORD, CMD_VERSION_DETAILS, CVN_ASSETINFO,
+    CVN_CHANGE_PRICE, CVN_DATE_AND_TIME, CVN_MACHNETCONFIG, CVN_PLU_RECORD, CVN_VERSION_DETAILS,
+    HEADER_LEN, STATUS_PLU_LAST_PLU, STATUS_PLU_NOT_FOUND, STATUS_SUCCESS, XS_DATA_PORT,
+    build_atomic_blocks,
+};
+
+#[derive(Debug, Clone)]
+pub struct XsDriverConfig {
+    pub host: String,
+    pub port: u16,
+    pub io_timeout: Duration,
+    pub store_id: Uuid,
+}
+
+impl XsDriverConfig {
+    pub fn new(host: impl Into<String>, store_id: Uuid) -> Self {
+        Self {
+            host: host.into(),
+            port: XS_DATA_PORT,
+            io_timeout: Duration::from_secs(5),
+            store_id,
+        }
+    }
+}
+
+/// Persistent TCP driver for Avery Berkel XS / M-Series scales (`MSeriesProtocol`).
+pub struct XsDriver {
+    config: XsDriverConfig,
+    stream: Option<TcpStream>,
+    sequence: u32,
+}
+
+impl XsDriver {
+    pub fn new(config: XsDriverConfig) -> Self {
+        Self {
+            config,
+            stream: None,
+            sequence: 0,
+        }
+    }
+
+    fn next_seq(&mut self) -> u32 {
+        self.sequence = self.sequence.wrapping_add(1);
+        self.sequence
+    }
+
+    /// Sends a command (atomic 1-write-per-block) and assembles all response blocks.
+    async fn send_command(
+        &mut self,
+        command_type: u16,
+        action: u8,
+        cvn: u16,
+        payload: &[u8],
+    ) -> Result<(i16, Vec<u8>), DriverError> {
+        let seq = self.next_seq();
+        let req_header = AbCmdHeader::new_request(command_type, action, cvn, seq);
+        let frames = build_atomic_blocks(req_header, payload)?;
+        let timeout = self.config.io_timeout;
+
+        let stream = self.stream.as_mut().ok_or(DriverError::NotConnected)?;
+
+        for frame in &frames {
+            tokio::time::timeout(timeout, stream.write_all(frame))
+                .await
+                .map_err(|_| DriverError::Timeout)??;
+        }
+        tokio::time::timeout(timeout, stream.flush())
+            .await
+            .map_err(|_| DriverError::Timeout)??;
+
+        let mut assembled = Vec::new();
+
+        let last_status = loop {
+            let mut hdr_buf = [0u8; HEADER_LEN];
+            tokio::time::timeout(timeout, stream.read_exact(&mut hdr_buf))
+                .await
+                .map_err(|_| DriverError::Timeout)??;
+
+            let resp_hdr = AbCmdHeader::decode(&hdr_buf)?;
+            let chunk_len = resp_hdr.payload_len();
+            if chunk_len > 0 {
+                let start = assembled.len();
+                assembled.resize(start + chunk_len, 0);
+                tokio::time::timeout(timeout, stream.read_exact(&mut assembled[start..]))
+                    .await
+                    .map_err(|_| DriverError::Timeout)??;
+            }
+
+            if resp_hdr.block_num >= resp_hdr.num_blocks || resp_hdr.num_blocks <= 1 {
+                break resp_hdr.status;
+            }
+        };
+
+        Ok((last_status, assembled))
+    }
+
+    async fn read_plu_with_flags(
+        &mut self,
+        key: PluKey,
+    ) -> Result<Option<(Plu, [u8; 2])>, DriverError> {
+        let req = encode_plu_search_header(key, key, 0, 0, false)?;
+        let (status, payload) = self
+            .send_command(CMD_PLU_RECORD, ACTION_REQUEST, CVN_PLU_RECORD, &req)
+            .await?;
+
+        match status {
+            STATUS_SUCCESS => Ok(Some(decode_plu_read(&payload, self.config.store_id)?)),
+            STATUS_PLU_NOT_FOUND | STATUS_PLU_LAST_PLU => Ok(None),
+            code => Err(DriverError::Protocol {
+                code: Some(i32::from(code)),
+                message: format!("PLU:READONE failed with status {code}"),
+            }),
+        }
+    }
+
+    async fn probe_plu_index(
+        &mut self,
+        from: PluKey,
+        to: PluKey,
+        index: u32,
+    ) -> Result<bool, DriverError> {
+        let req = encode_plu_search_header(from, to, 0, index, false)?;
+        let (status, _) = self
+            .send_command(CMD_PLU_RECORD, ACTION_REQUEST, CVN_PLU_RECORD, &req)
+            .await?;
+
+        match status {
+            STATUS_SUCCESS => Ok(true),
+            STATUS_PLU_NOT_FOUND | STATUS_PLU_LAST_PLU => Ok(false),
+            code => Err(DriverError::Protocol {
+                code: Some(i32::from(code)),
+                message: format!("PLU:READ probe failed at index {index} with status {code}"),
+            }),
+        }
+    }
+}
+
+#[async_trait]
+impl ScaleDriver for XsDriver {
+    fn capabilities(&self) -> DriverCapabilities {
+        DriverCapabilities::xs_default()
+    }
+
+    async fn connect(&mut self) -> Result<ScaleInfo, DriverError> {
+        let addr = format!("{}:{}", self.config.host, self.config.port);
+        let stream = tokio::time::timeout(self.config.io_timeout, TcpStream::connect(&addr))
+            .await
+            .map_err(|_| DriverError::Timeout)?
+            .map_err(|e| DriverError::ConnectionFailed(format!("{addr}: {e}")))?;
+
+        // Critical XS rule: TCP_NODELAY = true (paired with atomic write_all)
+        stream.set_nodelay(true)?;
+        self.stream = Some(stream);
+        self.get_info().await
+    }
+
+    async fn disconnect(&mut self) -> Result<(), DriverError> {
+        if let Some(mut stream) = self.stream.take() {
+            let _ = stream.shutdown().await;
+        }
+        Ok(())
+    }
+
+    async fn ping(&mut self) -> Result<(), DriverError> {
+        let (status, _) = self
+            .send_command(
+                CMD_VERSION_DETAILS,
+                ACTION_REQUEST,
+                CVN_VERSION_DETAILS,
+                &[],
+            )
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("VERSION_DETAILS failed with status {status}"),
+            })
+        }
+    }
+
+    async fn get_info(&mut self) -> Result<ScaleInfo, DriverError> {
+        let (status, ver_payload) = self
+            .send_command(
+                CMD_VERSION_DETAILS,
+                ACTION_REQUEST,
+                CVN_VERSION_DETAILS,
+                &[],
+            )
+            .await?;
+        if status != STATUS_SUCCESS {
+            return Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("VERSION_DETAILS failed with status {status}"),
+            });
+        }
+        let version = decode_version_details(&ver_payload);
+
+        let asset = match self
+            .send_command(CMD_ASSETINFO, ACTION_REQUEST, CVN_ASSETINFO, &[])
+            .await
+        {
+            Ok((STATUS_SUCCESS, data)) => decode_asset_info(&data).ok(),
+            _ => None,
+        };
+
+        let net = match self
+            .send_command(CMD_MACHNETCONFIG, ACTION_REQUEST, CVN_MACHNETCONFIG, &[])
+            .await
+        {
+            Ok((STATUS_SUCCESS, data)) => decode_mach_net_config(&data).ok(),
+            _ => None,
+        };
+
+        Ok(ScaleInfo {
+            family: ScaleFamily::AveryBerkelXs,
+            model: asset
+                .as_ref()
+                .map(|a| a.model.clone())
+                .filter(|m| !m.is_empty())
+                .unwrap_or(version.product),
+            serial_number: asset.as_ref().map(|a| a.serial_number.clone()),
+            firmware_version: asset
+                .as_ref()
+                .map(|a| a.app_version.clone())
+                .filter(|v| !v.is_empty())
+                .unwrap_or(version.version),
+            protocol_version: asset.map(|a| a.protocol),
+            mac_address: net.map(|n| n.mac_address),
+            requires_auth: false,
+        })
+    }
+
+    async fn get_datetime(&mut self) -> Result<ScaleDateTime, DriverError> {
+        let (status, payload) = self
+            .send_command(CMD_DATE_AND_TIME, ACTION_REQUEST, CVN_DATE_AND_TIME, &[])
+            .await?;
+        if status != STATUS_SUCCESS {
+            return Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("DATE_AND_TIME read failed with status {status}"),
+            });
+        }
+        decode_datetime(&payload)
+    }
+
+    async fn set_datetime(&mut self, dt: ScaleDateTime) -> Result<(), DriverError> {
+        let payload = encode_datetime(dt);
+        let (status, _) = self
+            .send_command(
+                CMD_DATE_AND_TIME,
+                ACTION_UPDATE,
+                CVN_DATE_AND_TIME,
+                &payload,
+            )
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("DATE_AND_TIME write failed with status {status}"),
+            })
+        }
+    }
+
+    async fn read_plu(&mut self, key: PluKey) -> Result<Option<Plu>, DriverError> {
+        Ok(self.read_plu_with_flags(key).await?.map(|(plu, _)| plu))
+    }
+
+    async fn list_plus(
+        &mut self,
+        from: Option<PluKey>,
+        to: Option<PluKey>,
+    ) -> Result<Vec<Plu>, DriverError> {
+        let from_key = from.unwrap_or(PluKey::new(0, 1)?);
+        let to_key = to.unwrap_or(PluKey::new(XS_MAX_DID, XS_MAX_PLU_NUMBER)?);
+
+        let mut plus = Vec::new();
+        let mut index: u32 = 0;
+
+        loop {
+            let req = encode_plu_search_header(from_key, to_key, 0, index, false)?;
+            let (status, payload) = self
+                .send_command(CMD_PLU_RECORD, ACTION_REQUEST, CVN_PLU_RECORD, &req)
+                .await?;
+
+            match status {
+                STATUS_SUCCESS => {
+                    let (plu, _) = decode_plu_read(&payload, self.config.store_id)?;
+                    plus.push(plu);
+                    index = index.saturating_add(1);
+                }
+                STATUS_PLU_NOT_FOUND | STATUS_PLU_LAST_PLU => break,
+                code => {
+                    return Err(DriverError::Protocol {
+                        code: Some(i32::from(code)),
+                        message: format!("PLU:READ failed at index {index} with status {code}"),
+                    });
+                }
+            }
+        }
+
+        Ok(plus)
+    }
+
+    /// O(log N) count using exponential + binary search on `SearchIndex`.
+    async fn count_plus(&mut self) -> Result<u64, DriverError> {
+        let from = PluKey::new(0, 1)?;
+        let to = PluKey::new(XS_MAX_DID, XS_MAX_PLU_NUMBER)?;
+
+        if !self.probe_plu_index(from, to, 0).await? {
+            return Ok(0);
+        }
+
+        let mut low: u32 = 0;
+        let mut high: u32 = 1;
+        while self.probe_plu_index(from, to, high).await? {
+            low = high;
+            high = high.saturating_mul(2);
+            if high == u32::MAX {
+                break;
+            }
+        }
+
+        while low + 1 < high {
+            let mid = low + (high - low) / 2;
+            if self.probe_plu_index(from, to, mid).await? {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+
+        Ok(u64::from(low) + 1)
+    }
+
+    async fn upsert_plu(&mut self, plu: &Plu) -> Result<(), DriverError> {
+        // Preserve internal scale flags (rec[0x4F..0x51]) when editing an existing PLU
+        let existing_flags = self
+            .read_plu_with_flags(plu.key)
+            .await?
+            .map(|(_, flags)| flags);
+
+        let payload = encode_plu_write(plu, existing_flags)?;
+        let (status, _) = self
+            .send_command(CMD_PLU_RECORD, ACTION_UPDATE, CVN_PLU_RECORD, &payload)
+            .await?;
+
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("PLU:WRITE failed with status {status}"),
+            })
+        }
+    }
+
+    async fn change_price(
+        &mut self,
+        key: PluKey,
+        price_1: MoneyCents,
+        price_2: Option<MoneyCents>,
+        price_3: Option<MoneyCents>,
+    ) -> Result<(), DriverError> {
+        let payload = encode_change_price(
+            key,
+            price_1,
+            price_2.unwrap_or(MoneyCents(0)),
+            price_3.unwrap_or(MoneyCents(0)),
+        )?;
+        let (status, _) = self
+            .send_command(CMD_CHANGE_PRICE, ACTION_UPDATE, CVN_CHANGE_PRICE, &payload)
+            .await?;
+
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("CHANGE_PRICE failed with status {status}"),
+            })
+        }
+    }
+
+    async fn delete_plu(&mut self, key: PluKey) -> Result<(), DriverError> {
+        let req = encode_plu_search_header(key, key, 0, 0, false)?;
+        let (status, _) = self
+            .send_command(CMD_PLU_RECORD, ACTION_CLEAR, CVN_PLU_RECORD, &req)
+            .await?;
+
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("PLU:DELETEONE failed with status {status}"),
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::KIND_RESPONSE;
+    use openscale_domain::types::new_id;
+    use openscale_domain::{ProductType, SyncMetadata};
+    use std::collections::BTreeMap;
+    use tokio::net::TcpListener;
+
+    async fn spawn_mock_xs_server() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let store_id = new_id();
+            let mut plus: BTreeMap<PluKey, Vec<u8>> = BTreeMap::new();
+
+            // Pre-populate 5 PLUs to test binary search count_plus()
+            for n in 1..=5u64 {
+                let key = PluKey::new(1, n).unwrap();
+                let plu = Plu {
+                    id: new_id(),
+                    key,
+                    description: format!("ITEM {n}"),
+                    button_text: None,
+                    price_1: MoneyCents((n as i64) * 1000),
+                    price_2: MoneyCents(0),
+                    price_3: MoneyCents(0),
+                    product_type: ProductType::ByWeight,
+                    ean: None,
+                    sku: None,
+                    group_id: 0,
+                    barcode_format_id: 1,
+                    label_format_id: 1,
+                    tare_id: Some(0),
+                    tare_grams: None,
+                    date_offset_1: 0,
+                    date_print_control_1: 0,
+                    date_offset_2: 0,
+                    date_print_control_2: 0,
+                    tax_rate_id_1: 0,
+                    tax_rate_id_2: 0,
+                    text_areas: vec![],
+                    delta_hash: String::new(),
+                    meta: SyncMetadata::new(store_id),
+                };
+                plus.insert(key, encode_plu_write(&plu, Some([0xAA, 0xBB])).unwrap());
+            }
+
+            let mut hdr_buf = [0u8; HEADER_LEN];
+            while socket.read_exact(&mut hdr_buf).await.is_ok() {
+                let req = AbCmdHeader::decode(&hdr_buf).unwrap();
+                let mut payload = vec![0u8; req.payload_len()];
+                if !payload.is_empty() {
+                    socket.read_exact(&mut payload).await.unwrap();
+                }
+
+                let (status, resp_payload): (i16, Vec<u8>) = match (req.command_type, req.action) {
+                    (CMD_VERSION_DETAILS, ACTION_REQUEST) => (
+                        STATUS_SUCCESS,
+                        b"M Series Scale\0APP. v4.1.7.0\0Jan 12 2016\0PROTOCOL 8000\0".to_vec(),
+                    ),
+                    (CMD_ASSETINFO, ACTION_REQUEST) => {
+                        let mut data = vec![0u8; 316];
+                        data[0x33..0x3B].copy_from_slice(b"22320310");
+                        data[0x69..0x6C].copy_from_slice(b"200");
+                        data[0xBC..0xC9].copy_from_slice(b"APP. v4.1.7.0");
+                        data[0x125..0x132].copy_from_slice(b"PROTOCOL 8000");
+                        (STATUS_SUCCESS, data)
+                    }
+                    (CMD_MACHNETCONFIG, ACTION_REQUEST) => {
+                        let mut data = vec![0u8; 48];
+                        data[0..4].copy_from_slice(&[127, 0, 0, 1]);
+                        data[0x20..0x26].copy_from_slice(&[0x00, 0xE0, 0x8A, 0x0D, 0x72, 0xAF]);
+                        (STATUS_SUCCESS, data)
+                    }
+                    (CMD_DATE_AND_TIME, ACTION_REQUEST) => {
+                        let dt = ScaleDateTime {
+                            year: 2026,
+                            month: 11,
+                            day: 22,
+                            hour: 18,
+                            minute: 30,
+                            second: 0,
+                        };
+                        (STATUS_SUCCESS, encode_datetime(dt).to_vec())
+                    }
+                    (CMD_DATE_AND_TIME, ACTION_UPDATE) => (STATUS_SUCCESS, vec![]),
+                    (CMD_PLU_RECORD, ACTION_REQUEST) => {
+                        let mut from_raw = [0u8; 8];
+                        let mut to_raw = [0u8; 8];
+                        from_raw.copy_from_slice(&payload[0..8]);
+                        to_raw.copy_from_slice(&payload[8..16]);
+                        let from_key = PluKey::from_xs_bytes(from_raw).unwrap();
+                        let to_key = PluKey::from_xs_bytes(to_raw).unwrap();
+                        let idx = u32::from_be_bytes([
+                            payload[32],
+                            payload[33],
+                            payload[34],
+                            payload[35],
+                        ]) as usize;
+
+                        let matching: Vec<&Vec<u8>> =
+                            plus.range(from_key..=to_key).map(|(_, v)| v).collect();
+                        if let Some(found) = matching.get(idx) {
+                            (STATUS_SUCCESS, (*found).clone())
+                        } else {
+                            (STATUS_PLU_LAST_PLU, vec![])
+                        }
+                    }
+                    (CMD_PLU_RECORD, ACTION_UPDATE) => {
+                        let mut key_raw = [0u8; 8];
+                        key_raw.copy_from_slice(&payload[0..8]);
+                        let key = PluKey::from_xs_bytes(key_raw).unwrap();
+                        plus.insert(key, payload);
+                        (STATUS_SUCCESS, vec![])
+                    }
+                    (CMD_PLU_RECORD, ACTION_CLEAR) => {
+                        let mut key_raw = [0u8; 8];
+                        key_raw.copy_from_slice(&payload[0..8]);
+                        let key = PluKey::from_xs_bytes(key_raw).unwrap();
+                        plus.remove(&key);
+                        (STATUS_SUCCESS, vec![])
+                    }
+                    (CMD_CHANGE_PRICE, ACTION_UPDATE) => {
+                        let mut key_raw = [0u8; 8];
+                        key_raw.copy_from_slice(&payload[0..8]);
+                        let key = PluKey::from_xs_bytes(key_raw).unwrap();
+                        if let Some(existing) = plus.get_mut(&key) {
+                            existing[41 + 0x0D..41 + 0x11].copy_from_slice(&payload[16..20]);
+                            (STATUS_SUCCESS, vec![])
+                        } else {
+                            (STATUS_PLU_NOT_FOUND, vec![])
+                        }
+                    }
+                    _ => (-1117, vec![]),
+                };
+
+                let mut resp_hdr = req;
+                resp_hdr.command_or_response = KIND_RESPONSE;
+                resp_hdr.status = status;
+                let frames = build_atomic_blocks(resp_hdr, &resp_payload).unwrap();
+                for frame in frames {
+                    socket.write_all(&frame).await.unwrap();
+                }
+            }
+        });
+
+        port
+    }
+
+    #[tokio::test]
+    async fn xs_driver_full_lifecycle_against_mock_tcp() {
+        let port = spawn_mock_xs_server().await;
+        let store_id = new_id();
+        let mut cfg = XsDriverConfig::new("127.0.0.1", store_id);
+        cfg.port = port;
+
+        let mut driver = XsDriver::new(cfg);
+        let info = driver.connect().await.unwrap();
+        assert_eq!(info.model, "XS200");
+        assert_eq!(info.serial_number.as_deref(), Some("22320310"));
+        assert_eq!(info.mac_address.as_deref(), Some("00:E0:8A:0D:72:AF"));
+
+        driver.ping().await.unwrap();
+        assert_eq!(driver.get_datetime().await.unwrap().year, 2026);
+        driver
+            .set_datetime(ScaleDateTime {
+                year: 2026,
+                month: 11,
+                day: 22,
+                hour: 19,
+                minute: 0,
+                second: 0,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(driver.count_plus().await.unwrap(), 5);
+        assert_eq!(driver.list_plus(None, None).await.unwrap().len(), 5);
+
+        let key = PluKey::new(1, 3).unwrap();
+        driver
+            .change_price(key, MoneyCents(9999), None, None)
+            .await
+            .unwrap();
+        let updated = driver.read_plu(key).await.unwrap().unwrap();
+        assert_eq!(updated.price_1, MoneyCents(9999));
+
+        driver.delete_plu(key).await.unwrap();
+        assert_eq!(driver.count_plus().await.unwrap(), 4);
+        driver.disconnect().await.unwrap();
+    }
+}

@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/openscale-domain",
     "crates/openscale-driver",
+    "crates/openscale-driver-xs",
+    "crates/openscale-driver-xti",
     "crates/openscale-storage",
 ]
 

@@ -180,8 +180,8 @@ Cada driver declara sus capacidades para evitar condicionales por modelo en la U
 ### Fase 1 — Aplicación de Escritorio (Prioridad #1, Tauri v2 + React)
 
 #### Hito `v0.1` — Núcleo Comercial (MVP Funcional)
-- [ ] **Drivers XS y XTi base:** Descubrimiento LAN simultáneo (UDP `23452` + `23453` + unicast por rango), handshake (`VERSION_DETAILS`/`ASSETINFO`/`MACHNETCONFIG` en XS; Banner XML + `PING` en XTi), fecha/hora, CRUD de PLUs, conteo rápido `O(log N)` en XS y cambio rápido de precios.
-- [ ] **Validación física XTi:** probar y ajustar `openscale-driver-xti` contra báscula XTi real y actualizar [protocolo-xti-xtra.md](./protocolo-xti-xtra.md).
+- [x] **Drivers XS y XTi base:** Descubrimiento LAN simultáneo (UDP `23452` + `23453` + unicast por rango), handshake (`VERSION_DETAILS`/`ASSETINFO`/`MACHNETCONFIG` en XS; Banner XML + `PLU:READ SQLW="1=0"` en XTi), fecha/hora, CRUD de PLUs, conteo rápido `O(log N)` en XS y cambio rápido de precios.
+- [x] **Validación física XTi:** probar y ajustar `openscale-driver-xti` contra báscula XTi real (`192.168.9.115`) y actualizar [protocolo-xti-xtra.md](./protocolo-xti-xtra.md).
 - [ ] **`ScaleManager`:** pool TCP persistente por báscula, reconexión automática, monitor online/offline y cola de comandos.
 - [ ] **Catálogo Maestro + CRUD PLUs:** tabla virtualizada para miles de PLUs, filtros, edición masiva de precios e importación/exportación **CSV y Excel (`.xlsx`)**.
 - [ ] **Motor de Sincronización:** importar catálogo desde báscula física hacia SQLite, *Delta Sync* / *Full Sync* hacia 1 o N básculas con barra de progreso, respaldo y clonación.

@@ -1,0 +1,18 @@
+[package]
+name = "openscale-driver-xti"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Avery Berkel XTi / XTRA protocol driver (TCP 3002, UDP 23453) for OpenScale."
+
+[dependencies]
+async-trait.workspace = true
+openscale-domain = { path = "../openscale-domain" }
+openscale-driver = { path = "../openscale-driver" }
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true
