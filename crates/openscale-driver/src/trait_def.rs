@@ -120,10 +120,7 @@ pub trait ScaleDriver: Send + Sync {
         Err(DriverError::Unsupported("read_media_asset"))
     }
 
-    async fn read_label_format(
-        &mut self,
-        _pfid: u16,
-    ) -> Result<Option<LabelFormat>, DriverError> {
+    async fn read_label_format(&mut self, _pfid: u16) -> Result<Option<LabelFormat>, DriverError> {
         Err(DriverError::Unsupported("read_label_format"))
     }
 

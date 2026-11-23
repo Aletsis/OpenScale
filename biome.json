@@ -16,7 +16,8 @@
       "test-results/**",
       "pnpm-lock.yaml",
       "Cargo.lock",
-      "scripts/**"
+      "scripts/**",
+      "apps/desktop/src-tauri/gen/**"
     ]
   },
   "formatter": {

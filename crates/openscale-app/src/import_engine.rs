@@ -583,9 +583,21 @@ fn diff_plu(local: &Plu, remote: &Plu) -> Vec<FieldDiff> {
         local.button_text.clone().unwrap_or_default(),
         remote.button_text.clone().unwrap_or_default(),
     );
-    push("price_1", fmt_money(local.price_1), fmt_money(remote.price_1));
-    push("price_2", fmt_money(local.price_2), fmt_money(remote.price_2));
-    push("price_3", fmt_money(local.price_3), fmt_money(remote.price_3));
+    push(
+        "price_1",
+        fmt_money(local.price_1),
+        fmt_money(remote.price_1),
+    );
+    push(
+        "price_2",
+        fmt_money(local.price_2),
+        fmt_money(remote.price_2),
+    );
+    push(
+        "price_3",
+        fmt_money(local.price_3),
+        fmt_money(remote.price_3),
+    );
     push(
         "product_type",
         format!("{:?}", local.product_type),

@@ -640,8 +640,11 @@ async fn selective_import_with_conflict_resolution_e2e() {
     let req = ScaleImportApplyRequest {
         scale_id,
         plus: preview.new_plus.clone(), // omit conflict_plus[0] => keep local
-        departments: [preview.new_departments.clone(), preview.conflict_departments.clone()]
-            .concat(),
+        departments: [
+            preview.new_departments.clone(),
+            preview.conflict_departments.clone(),
+        ]
+        .concat(),
         tares: [preview.new_tares.clone(), preview.conflict_tares.clone()].concat(),
         tax_rates: preview.new_tax_rates.clone(),
         stored_texts: preview.new_stored_texts.clone(),
@@ -663,16 +666,27 @@ async fn selective_import_with_conflict_resolution_e2e() {
     assert_eq!(result.skipped_unchanged, 1);
 
     // Verify local DB reflects exact user choices
-    let plu2 = app.get_plu(PluKey::new(1, 2).unwrap()).await.unwrap().unwrap();
+    let plu2 = app
+        .get_plu(PluKey::new(1, 2).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(plu2.description, "PECHUGA LOCAL");
     assert_eq!(plu2.price_1, MoneyCents(11000));
 
-    let plu3 = app.get_plu(PluKey::new(1, 3).unwrap()).await.unwrap().unwrap();
+    let plu3 = app
+        .get_plu(PluKey::new(1, 3).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(plu3.description, "PIERNA NUEVA");
 
     let depts = app.list_departments().await.unwrap();
     assert_eq!(depts.len(), 2);
-    assert_eq!(depts.iter().find(|d| d.did == 1).unwrap().name, "CARNICERIA BASCULA");
+    assert_eq!(
+        depts.iter().find(|d| d.did == 1).unwrap().name,
+        "CARNICERIA BASCULA"
+    );
 
     let tares = app.list_tares().await.unwrap();
     assert_eq!(tares.len(), 2);
