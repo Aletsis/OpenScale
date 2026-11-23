@@ -132,3 +132,90 @@ export interface BulkPriceAdjustment {
   mode: "percent" | "fixed_cents";
   value: number;
 }
+
+export interface Department {
+  id: string;
+  did: number;
+  name: string;
+  meta: SyncMetadata;
+}
+
+export interface Tare {
+  id: string;
+  cid: number;
+  name: string;
+  weight_grams: number;
+  meta: SyncMetadata;
+}
+
+export interface TaxRate {
+  id: string;
+  tax_id: number;
+  name: string;
+  rate_basis_points: number;
+  meta: SyncMetadata;
+}
+
+export interface StoredText {
+  id: string;
+  text_id: number;
+  title: string;
+  content: string;
+  meta: SyncMetadata;
+}
+
+export interface BarcodeFormat {
+  id: string;
+  bid: number;
+  name: string;
+  definition_json: string;
+  meta: SyncMetadata;
+}
+
+export interface GrandTotals {
+  period: number;
+  counter_sales: number;
+  prepack_sales: number;
+  transactions: number;
+  gross_total: number;
+  last_cleared_at: string | null;
+}
+
+export interface DeptTotals {
+  period: number;
+  did: number;
+  counter_sales: number;
+  prepack_sales: number;
+  transactions: number;
+  last_cleared_at: string | null;
+}
+
+export interface PluTotals {
+  period: number;
+  key: PluKey;
+  transactions: number;
+  counter_sales: number;
+  counter_quantity: number;
+  counter_transactions: number;
+  prepack_sales: number;
+  prepack_quantity: number;
+  last_cleared_at: string | null;
+}
+
+export interface ScaleSalesReport {
+  scale_id: string;
+  period: number;
+  captured_at: string;
+  grand_totals: GrandTotals | null;
+  dept_totals: DeptTotals[];
+  plu_totals: PluTotals[];
+}
+
+export interface SalesSnapshot {
+  id: string;
+  scale_id: string;
+  period: number;
+  captured_at: string;
+  payload_json: string;
+  meta: SyncMetadata;
+}

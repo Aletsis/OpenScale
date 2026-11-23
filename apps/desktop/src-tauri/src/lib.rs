@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use openscale_app::{OpenScaleApp, SyncMode, SyncReport};
-use openscale_domain::{Plu, PluKey, Scale};
+use openscale_domain::{
+    BarcodeFormat, Department, Plu, PluKey, SalesSnapshot, Scale, ScaleSalesReport, StoredText,
+    Tare, TaxRate,
+};
 use openscale_driver::DiscoveredScale;
 use openscale_storage::{Database, StorageConfig};
 use tauri::{Emitter, Manager, State};
@@ -80,6 +83,132 @@ async fn sync_scale(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn list_departments(state: State<'_, DesktopState>) -> Result<Vec<Department>, String> {
+    state
+        .app
+        .list_departments()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn upsert_department(
+    state: State<'_, DesktopState>,
+    dept: Department,
+) -> Result<Department, String> {
+    state
+        .app
+        .upsert_department(dept)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_tares(state: State<'_, DesktopState>) -> Result<Vec<Tare>, String> {
+    state.app.list_tares().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn upsert_tare(state: State<'_, DesktopState>, tare: Tare) -> Result<Tare, String> {
+    state.app.upsert_tare(tare).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_tax_rates(state: State<'_, DesktopState>) -> Result<Vec<TaxRate>, String> {
+    state.app.list_tax_rates().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn upsert_tax_rate(state: State<'_, DesktopState>, tax: TaxRate) -> Result<TaxRate, String> {
+    state
+        .app
+        .upsert_tax_rate(tax)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_stored_texts(state: State<'_, DesktopState>) -> Result<Vec<StoredText>, String> {
+    state
+        .app
+        .list_stored_texts()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn upsert_stored_text(
+    state: State<'_, DesktopState>,
+    text: StoredText,
+) -> Result<StoredText, String> {
+    state
+        .app
+        .upsert_stored_text(text)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_barcode_formats(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<BarcodeFormat>, String> {
+    state
+        .app
+        .list_barcode_formats()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn upsert_barcode_format(
+    state: State<'_, DesktopState>,
+    fmt: BarcodeFormat,
+) -> Result<BarcodeFormat, String> {
+    state
+        .app
+        .upsert_barcode_format(fmt)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn sync_master_tables(
+    state: State<'_, DesktopState>,
+    scale_id: Uuid,
+) -> Result<usize, String> {
+    state
+        .app
+        .sync_master_tables(scale_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn capture_sales_snapshot(
+    state: State<'_, DesktopState>,
+    scale_id: Uuid,
+    period: u8,
+) -> Result<ScaleSalesReport, String> {
+    state
+        .app
+        .capture_sales_snapshot(scale_id, period)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_sales_snapshots(
+    state: State<'_, DesktopState>,
+    scale_id: Option<Uuid>,
+) -> Result<Vec<SalesSnapshot>, String> {
+    state
+        .app
+        .list_sales_snapshots(scale_id, 50)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -124,6 +253,19 @@ pub fn run() {
             delete_plu,
             import_from_scale,
             sync_scale,
+            list_departments,
+            upsert_department,
+            list_tares,
+            upsert_tare,
+            list_tax_rates,
+            upsert_tax_rate,
+            list_stored_texts,
+            upsert_stored_text,
+            list_barcode_formats,
+            upsert_barcode_format,
+            sync_master_tables,
+            capture_sales_snapshot,
+            list_sales_snapshots,
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenScale desktop application");

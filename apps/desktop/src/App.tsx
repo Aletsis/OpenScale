@@ -21,11 +21,13 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
+  BarChart3,
   Check,
   Database,
   Download,
   Globe,
   History,
+  Layers,
   Moon,
   Pencil,
   Percent,
@@ -42,9 +44,11 @@ import {
 import { type FormEvent, useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { MasterTablesView } from "./components/MasterTablesView.js";
 import { PluFormDialog } from "./components/PluFormDialog.js";
+import { SalesReportsView } from "./components/SalesReportsView.js";
 
-type Tab = "scales" | "catalog" | "sync";
+type Tab = "scales" | "catalog" | "masterTables" | "reports" | "sync";
 
 interface SyncHistoryEntry {
   id: string;
@@ -924,6 +928,22 @@ export function App() {
               {syncHistory.length}
             </span>
           </Button>
+          <Button
+            variant={activeTab === "masterTables" ? "default" : "ghost"}
+            className="justify-start"
+            onClick={() => setActiveTab("masterTables")}
+          >
+            <Layers className="h-4 w-4" />
+            Master Tables
+          </Button>
+          <Button
+            variant={activeTab === "reports" ? "default" : "ghost"}
+            className="justify-start"
+            onClick={() => setActiveTab("reports")}
+          >
+            <BarChart3 className="h-4 w-4" />
+            {t("nav.reports")}
+          </Button>
         </nav>
 
         <div className="mt-auto flex items-center gap-2 border-t border-border pt-4">
@@ -951,6 +971,26 @@ export function App() {
 
       <main className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-6xl space-y-6">
+          {activeTab === "masterTables" && (
+            <>
+              <h2 className="text-xl font-semibold tracking-tight">Master Tables</h2>
+              <MasterTablesView
+                scales={scales}
+                onStatus={(message) => toast({ variant: "info", message })}
+              />
+            </>
+          )}
+
+          {activeTab === "reports" && (
+            <>
+              <h2 className="text-xl font-semibold tracking-tight">{t("nav.reports")}</h2>
+              <SalesReportsView
+                scales={scales}
+                onStatus={(message) => toast({ variant: "info", message })}
+              />
+            </>
+          )}
+
           {activeTab === "scales" && (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3">

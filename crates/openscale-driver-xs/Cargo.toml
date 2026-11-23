@@ -12,6 +12,8 @@ bytes.workspace = true
 encoding_rs.workspace = true
 openscale-domain = { path = "../openscale-domain" }
 openscale-driver = { path = "../openscale-driver" }
+serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true

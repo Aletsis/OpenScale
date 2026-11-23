@@ -1,5 +1,8 @@
 use async_trait::async_trait;
-use openscale_domain::{MoneyCents, Plu, PluKey};
+use openscale_domain::{
+    BarcodeFormat, Department, DeptTotals, GrandTotals, GroupTotals, MachTotals, MediaAsset,
+    MoneyCents, OperatorTotals, Plu, PluKey, PluTotals, StoredText, Tare, TaxRate,
+};
 
 use crate::capabilities::DriverCapabilities;
 use crate::error::DriverError;
@@ -56,4 +59,98 @@ pub trait ScaleDriver: Send + Sync {
 
     /// Deletes a single PLU from the scale.
     async fn delete_plu(&mut self, key: PluKey) -> Result<(), DriverError>;
+
+    // --- Master Tables (v0.2) ---
+
+    async fn read_department(&mut self, _did: u32) -> Result<Option<Department>, DriverError> {
+        Err(DriverError::Unsupported("read_department"))
+    }
+
+    async fn upsert_department(&mut self, _dept: &Department) -> Result<(), DriverError> {
+        Err(DriverError::Unsupported("upsert_department"))
+    }
+
+    async fn read_tare(&mut self, _cid: u16) -> Result<Option<Tare>, DriverError> {
+        Err(DriverError::Unsupported("read_tare"))
+    }
+
+    async fn upsert_tare(&mut self, _tare: &Tare) -> Result<(), DriverError> {
+        Err(DriverError::Unsupported("upsert_tare"))
+    }
+
+    async fn read_tax_rate(&mut self, _tax_id: u8) -> Result<Option<TaxRate>, DriverError> {
+        Err(DriverError::Unsupported("read_tax_rate"))
+    }
+
+    async fn upsert_tax_rate(&mut self, _tax: &TaxRate) -> Result<(), DriverError> {
+        Err(DriverError::Unsupported("upsert_tax_rate"))
+    }
+
+    async fn read_stored_text(
+        &mut self,
+        _text_id: u32,
+        _table: u8,
+    ) -> Result<Option<StoredText>, DriverError> {
+        Err(DriverError::Unsupported("read_stored_text"))
+    }
+
+    async fn upsert_stored_text(
+        &mut self,
+        _text: &StoredText,
+        _table: u8,
+    ) -> Result<(), DriverError> {
+        Err(DriverError::Unsupported("upsert_stored_text"))
+    }
+
+    async fn read_barcode_format(
+        &mut self,
+        _bid: u16,
+    ) -> Result<Option<BarcodeFormat>, DriverError> {
+        Err(DriverError::Unsupported("read_barcode_format"))
+    }
+
+    async fn upsert_barcode_format(&mut self, _fmt: &BarcodeFormat) -> Result<(), DriverError> {
+        Err(DriverError::Unsupported("upsert_barcode_format"))
+    }
+
+    async fn read_media_asset(
+        &mut self,
+        _media_id: u32,
+    ) -> Result<Option<MediaAsset>, DriverError> {
+        Err(DriverError::Unsupported("read_media_asset"))
+    }
+
+    // --- Sales & Totals (v0.2) ---
+
+    async fn read_grand_totals(&mut self, _period: u8) -> Result<Option<GrandTotals>, DriverError> {
+        Err(DriverError::Unsupported("read_grand_totals"))
+    }
+
+    async fn list_dept_totals(&mut self, _period: u8) -> Result<Vec<DeptTotals>, DriverError> {
+        Err(DriverError::Unsupported("list_dept_totals"))
+    }
+
+    async fn read_group_totals(
+        &mut self,
+        _period: u8,
+        _group_id: u32,
+    ) -> Result<Option<GroupTotals>, DriverError> {
+        Err(DriverError::Unsupported("read_group_totals"))
+    }
+
+    async fn read_operator_totals(
+        &mut self,
+        _period: u8,
+        _operator_id: u32,
+    ) -> Result<Option<OperatorTotals>, DriverError> {
+        Err(DriverError::Unsupported("read_operator_totals"))
+    }
+
+    async fn read_mach_totals(&mut self, _period: u8) -> Result<Option<MachTotals>, DriverError> {
+        Err(DriverError::Unsupported("read_mach_totals"))
+    }
+
+    async fn list_plu_totals(&mut self, _period: u8) -> Result<Vec<PluTotals>, DriverError> {
+        Err(DriverError::Unsupported("list_plu_totals"))
+    }
 }

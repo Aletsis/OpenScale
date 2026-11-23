@@ -2,7 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use openscale_domain::{MoneyCents, Plu, PluKey, Scale, ScaleFamily};
+use chrono::Utc;
+use openscale_domain::{
+    BarcodeFormat, Department, MoneyCents, Plu, PluKey, Scale, ScaleFamily, ScaleSalesReport,
+    StoredText, Tare, TaxRate,
+};
 use openscale_driver::{
     ConnectionState, DriverCapabilities, DriverError, ScaleDateTime, ScaleDriver, ScaleEvent,
     ScaleInfo,
@@ -36,6 +40,12 @@ enum ScaleCommand {
         reply: oneshot::Sender<Result<(), DriverError>>,
     },
     DeletePlu(PluKey, oneshot::Sender<Result<(), DriverError>>),
+    UpsertDepartment(Department, oneshot::Sender<Result<(), DriverError>>),
+    UpsertTare(Tare, oneshot::Sender<Result<(), DriverError>>),
+    UpsertTaxRate(TaxRate, oneshot::Sender<Result<(), DriverError>>),
+    UpsertStoredText(StoredText, u8, oneshot::Sender<Result<(), DriverError>>),
+    UpsertBarcodeFormat(BarcodeFormat, oneshot::Sender<Result<(), DriverError>>),
+    CaptureSalesReport(u8, oneshot::Sender<Result<ScaleSalesReport, DriverError>>),
 }
 
 /// Handle for sending serialized commands to a single scale's dedicated Tokio Actor.
@@ -165,6 +175,60 @@ impl ScaleHandle {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(ScaleCommand::DeletePlu(key, tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn upsert_department(&self, dept: Department) -> Result<(), AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::UpsertDepartment(dept, tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn upsert_tare(&self, tare: Tare) -> Result<(), AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::UpsertTare(tare, tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn upsert_tax_rate(&self, tax: TaxRate) -> Result<(), AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::UpsertTaxRate(tax, tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn upsert_stored_text(&self, text: StoredText, table: u8) -> Result<(), AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::UpsertStoredText(text, table, tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn upsert_barcode_format(&self, fmt: BarcodeFormat) -> Result<(), AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::UpsertBarcodeFormat(fmt, tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn capture_sales_report(&self, period: u8) -> Result<ScaleSalesReport, AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::CaptureSalesReport(period, tx))
             .await
             .map_err(|_| AppError::ActorUnavailable)?;
         Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
@@ -321,6 +385,47 @@ async fn run_scale_actor(
             }
             ScaleCommand::DeletePlu(key, reply) => {
                 let _ = reply.send(driver.delete_plu(key).await);
+            }
+            ScaleCommand::UpsertDepartment(dept, reply) => {
+                let _ = reply.send(driver.upsert_department(&dept).await);
+            }
+            ScaleCommand::UpsertTare(tare, reply) => {
+                let _ = reply.send(driver.upsert_tare(&tare).await);
+            }
+            ScaleCommand::UpsertTaxRate(tax, reply) => {
+                let _ = reply.send(driver.upsert_tax_rate(&tax).await);
+            }
+            ScaleCommand::UpsertStoredText(text, table, reply) => {
+                let _ = reply.send(driver.upsert_stored_text(&text, table).await);
+            }
+            ScaleCommand::UpsertBarcodeFormat(fmt, reply) => {
+                let _ = reply.send(driver.upsert_barcode_format(&fmt).await);
+            }
+            ScaleCommand::CaptureSalesReport(period, reply) => {
+                let res = async {
+                    let grand_totals = match driver.read_grand_totals(period).await {
+                        Ok(v) => v,
+                        Err(DriverError::NotConnected) => {
+                            driver.connect().await?;
+                            driver.read_grand_totals(period).await?
+                        }
+                        Err(e) => return Err(e),
+                    };
+                    let mach_totals = driver.read_mach_totals(period).await.ok().flatten();
+                    let dept_totals = driver.list_dept_totals(period).await.unwrap_or_default();
+                    let plu_totals = driver.list_plu_totals(period).await.unwrap_or_default();
+                    Ok(ScaleSalesReport {
+                        scale_id,
+                        period,
+                        captured_at: Utc::now(),
+                        grand_totals,
+                        mach_totals,
+                        dept_totals,
+                        plu_totals,
+                    })
+                }
+                .await;
+                let _ = reply.send(res);
             }
         }
     }

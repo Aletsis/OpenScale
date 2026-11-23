@@ -188,8 +188,8 @@ Cada driver declara sus capacidades para evitar condicionales por modelo en la U
 - [x] **UI Base:** layout responsive, tema claro/oscuro, selector EN/ES, roles locales (con Single-User Mode opcional) y logs de actividad.
 
 #### Hito `v0.2` — Tablas Maestras + Ventas y Reportes
-- [ ] **Tablas Maestras:** CRUD y sincronización de Departamentos, Taras/Contenedores, Impuestos, Textos/Leyendas, Logos/Media BMP y Formatos de Códigos de Barras (`BARCODE_FORMATS`).
-- [ ] **Ventas y Reportes:** lectura de `GRAND_TOTALS`, `DEPT_TOTALS`, `GROUP_TOTALS`, `OPERATOR_TOTALS`, `MACH_TOTALS` y `PLU_TOTALS` (períodos 0 y 1), historial de *snapshots* en SQLite, gráficas y exportación CSV/Excel/PDF.
+- [x] **Tablas Maestras:** CRUD y sincronización de Departamentos, Taras/Contenedores, Impuestos, Textos/Leyendas, Logos/Media BMP y Formatos de Códigos de Barras (`BARCODE_FORMATS`).
+- [x] **Ventas y Reportes:** lectura de `GRAND_TOTALS`, `DEPT_TOTALS`, `GROUP_TOTALS`, `OPERATOR_TOTALS`, `MACH_TOTALS` y `PLU_TOTALS` (períodos 0 y 1), historial de *snapshots* en SQLite, gráficas y exportación CSV/Excel/PDF.
 
 #### Hito `v0.3` — Consola de Servicio Técnico + Respaldo de Etiquetas
 - [ ] **`XsServicePort` (`28822`):** peso en vivo, balance/tara remota, editor legible de `#748 Scale Settings`, lectura de memoria/pools, logs de diagnóstico (`SYSTEM`/`COMMS`/`KEYBOARD`), impresión de prueba, cajón y reinicio remoto.

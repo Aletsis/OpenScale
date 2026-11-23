@@ -1,8 +1,16 @@
 use std::time::Duration;
 
-use openscale_domain::{Plu, PluKey, Scale};
+use chrono::Utc;
+use openscale_domain::types::new_id;
+use openscale_domain::{
+    BarcodeFormat, Department, Plu, PluKey, SalesSnapshot, Scale, ScaleSalesReport, StoredText,
+    SyncMetadata, Tare, TaxRate,
+};
 use openscale_driver::DiscoveredScale;
-use openscale_storage::repos::{AuditRepository, PluRepository, ScaleRepository};
+use openscale_storage::repos::{
+    AuditRepository, MasterTablesRepository, PluRepository, SalesSnapshotRepository,
+    ScaleRepository,
+};
 use openscale_storage::{DEFAULT_LOCAL_STORE_ID, Database};
 use uuid::Uuid;
 
@@ -38,6 +46,14 @@ impl OpenScaleApp {
 
     pub fn plu_repo(&self) -> PluRepository {
         PluRepository::new(self.db.pool().clone())
+    }
+
+    pub fn master_tables_repo(&self) -> MasterTablesRepository {
+        MasterTablesRepository::new(self.db.pool().clone())
+    }
+
+    pub fn sales_repo(&self) -> SalesSnapshotRepository {
+        SalesSnapshotRepository::new(self.db.pool().clone())
     }
 
     pub fn audit_repo(&self) -> AuditRepository {
@@ -81,5 +97,139 @@ impl OpenScaleApp {
 
     pub async fn sync_scale(&self, scale_id: Uuid, mode: SyncMode) -> Result<SyncReport, AppError> {
         self.sync.sync_to_scale(self.store_id, scale_id, mode).await
+    }
+
+    // --- Master Tables (v0.2) ---
+
+    pub async fn list_departments(&self) -> Result<Vec<Department>, AppError> {
+        Ok(self
+            .master_tables_repo()
+            .list_departments(self.store_id)
+            .await?)
+    }
+
+    pub async fn upsert_department(&self, dept: Department) -> Result<Department, AppError> {
+        self.master_tables_repo().upsert_department(&dept).await?;
+        Ok(dept)
+    }
+
+    pub async fn list_tares(&self) -> Result<Vec<Tare>, AppError> {
+        Ok(self.master_tables_repo().list_tares(self.store_id).await?)
+    }
+
+    pub async fn upsert_tare(&self, tare: Tare) -> Result<Tare, AppError> {
+        self.master_tables_repo().upsert_tare(&tare).await?;
+        Ok(tare)
+    }
+
+    pub async fn list_tax_rates(&self) -> Result<Vec<TaxRate>, AppError> {
+        Ok(self
+            .master_tables_repo()
+            .list_tax_rates(self.store_id)
+            .await?)
+    }
+
+    pub async fn upsert_tax_rate(&self, tax: TaxRate) -> Result<TaxRate, AppError> {
+        self.master_tables_repo().upsert_tax_rate(&tax).await?;
+        Ok(tax)
+    }
+
+    pub async fn list_stored_texts(&self) -> Result<Vec<StoredText>, AppError> {
+        Ok(self
+            .master_tables_repo()
+            .list_stored_texts(self.store_id)
+            .await?)
+    }
+
+    pub async fn upsert_stored_text(&self, text: StoredText) -> Result<StoredText, AppError> {
+        self.master_tables_repo().upsert_stored_text(&text).await?;
+        Ok(text)
+    }
+
+    pub async fn list_barcode_formats(&self) -> Result<Vec<BarcodeFormat>, AppError> {
+        Ok(self
+            .master_tables_repo()
+            .list_barcode_formats(self.store_id)
+            .await?)
+    }
+
+    pub async fn upsert_barcode_format(
+        &self,
+        fmt: BarcodeFormat,
+    ) -> Result<BarcodeFormat, AppError> {
+        self.master_tables_repo()
+            .upsert_barcode_format(&fmt)
+            .await?;
+        Ok(fmt)
+    }
+
+    /// Pushes all active local master tables to a target scale.
+    pub async fn sync_master_tables(&self, scale_id: Uuid) -> Result<usize, AppError> {
+        let handle = self.scales.get(scale_id).await?;
+        let _ = handle.connect().await;
+        let mut sent = 0usize;
+
+        for dept in self.list_departments().await? {
+            if handle.upsert_department(dept).await.is_ok() {
+                sent += 1;
+            }
+        }
+        for tare in self.list_tares().await? {
+            if handle.upsert_tare(tare).await.is_ok() {
+                sent += 1;
+            }
+        }
+        for tax in self.list_tax_rates().await? {
+            if handle.upsert_tax_rate(tax).await.is_ok() {
+                sent += 1;
+            }
+        }
+        for text in self.list_stored_texts().await? {
+            if handle.upsert_stored_text(text, 0).await.is_ok() {
+                sent += 1;
+            }
+        }
+        for fmt in self.list_barcode_formats().await? {
+            if handle.upsert_barcode_format(fmt).await.is_ok() {
+                sent += 1;
+            }
+        }
+
+        Ok(sent)
+    }
+
+    // --- Sales & Snapshots (v0.2) ---
+
+    pub async fn capture_sales_snapshot(
+        &self,
+        scale_id: Uuid,
+        period: u8,
+    ) -> Result<ScaleSalesReport, AppError> {
+        let handle = self.scales.get(scale_id).await?;
+        let report = handle.capture_sales_report(period).await?;
+        let payload_json =
+            serde_json::to_string(&report).map_err(openscale_storage::StorageError::Serde)?;
+
+        let snapshot = SalesSnapshot {
+            id: new_id(),
+            scale_id,
+            period,
+            captured_at: Utc::now(),
+            payload_json,
+            meta: SyncMetadata::new(self.store_id),
+        };
+        self.sales_repo().insert(&snapshot).await?;
+        Ok(report)
+    }
+
+    pub async fn list_sales_snapshots(
+        &self,
+        scale_id: Option<Uuid>,
+        limit: i64,
+    ) -> Result<Vec<SalesSnapshot>, AppError> {
+        Ok(self
+            .sales_repo()
+            .list_recent(self.store_id, scale_id, limit)
+            .await?)
     }
 }

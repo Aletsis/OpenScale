@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use openscale_domain::types::{XS_MAX_DID, XS_MAX_PLU_NUMBER};
-use openscale_domain::{MoneyCents, Plu, PluKey, ScaleFamily};
+use openscale_domain::{
+    BarcodeFormat, Department, DeptTotals, GrandTotals, GroupTotals, MachTotals, MediaAsset,
+    MoneyCents, OperatorTotals, Plu, PluKey, PluTotals, ScaleFamily, StoredText, Tare, TaxRate,
+};
 use openscale_driver::{DriverCapabilities, DriverError, ScaleDateTime, ScaleDriver, ScaleInfo};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -13,12 +16,26 @@ use crate::codec::{
     decode_version_details, encode_change_price, encode_datetime, encode_plu_search_header,
     encode_plu_write,
 };
+use crate::master_tables::{
+    decode_barcode_format_read, decode_department_read, decode_media_asset_read,
+    decode_stored_text_read, decode_tare_read, decode_tax_read, encode_barcode_format_write,
+    encode_department_write, encode_stored_text_write, encode_tare_read, encode_tare_write,
+    encode_tax_read, encode_tax_write,
+};
 use crate::protocol::{
-    ACTION_CLEAR, ACTION_REQUEST, ACTION_UPDATE, AbCmdHeader, CMD_ASSETINFO, CMD_CHANGE_PRICE,
-    CMD_DATE_AND_TIME, CMD_MACHNETCONFIG, CMD_PLU_RECORD, CMD_VERSION_DETAILS, CVN_ASSETINFO,
-    CVN_CHANGE_PRICE, CVN_DATE_AND_TIME, CVN_MACHNETCONFIG, CVN_PLU_RECORD, CVN_VERSION_DETAILS,
-    HEADER_LEN, MAX_DATA_BLOCK_SIZE, STATUS_PLU_LAST_PLU, STATUS_PLU_NOT_FOUND, STATUS_SUCCESS,
-    XS_DATA_PORT,
+    ACTION_CLEAR, ACTION_REQUEST, ACTION_UPDATE, AbCmdHeader, CMD_ASSETINFO, CMD_BARCODE_FORMATS,
+    CMD_CHANGE_PRICE, CMD_DATE_AND_TIME, CMD_DEPT_NAMES, CMD_DEPT_TOTALS, CMD_GRAND_TOTALS,
+    CMD_GROUP_TOTALS, CMD_MACH_TOTALS, CMD_MACHNETCONFIG, CMD_MEDIA, CMD_OPERATOR_TOTALS,
+    CMD_PLU_RECORD, CMD_PLU_TOTALS, CMD_STORED_TARE, CMD_STORED_TEXT, CMD_TAX_RATES,
+    CMD_VERSION_DETAILS, CVN_ASSETINFO, CVN_BARCODE_FORMATS, CVN_CHANGE_PRICE, CVN_DATE_AND_TIME,
+    CVN_DEPT_NAMES, CVN_MACHNETCONFIG, CVN_MEDIA, CVN_PLU_RECORD, CVN_PLU_TOTALS, CVN_STORED_TARE,
+    CVN_STORED_TEXT, CVN_TAX_RATES, CVN_TOTALS_BASIC, CVN_VERSION_DETAILS, HEADER_LEN,
+    MAX_DATA_BLOCK_SIZE, STATUS_NO_TOTALS_FOUND, STATUS_PLU_LAST_PLU, STATUS_PLU_NOT_FOUND,
+    STATUS_SUCCESS, XS_DATA_PORT,
+};
+use crate::sales::{
+    decode_dept_totals, decode_grand_totals, decode_group_totals, decode_mach_totals,
+    decode_operator_totals, decode_plu_totals,
 };
 
 #[derive(Debug, Clone)]
@@ -496,6 +513,356 @@ impl ScaleDriver for XsDriver {
                 message: format!("PLU:DELETEONE failed with status {status}"),
             })
         }
+    }
+
+    async fn read_department(&mut self, did: u32) -> Result<Option<Department>, DriverError> {
+        let did_u8 = u8::try_from(did).map_err(|_| DriverError::Protocol {
+            code: None,
+            message: format!("XS department DID {did} out of range"),
+        })?;
+        let (status, payload) = self
+            .send_command(CMD_DEPT_NAMES, ACTION_REQUEST, CVN_DEPT_NAMES, &[did_u8])
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(Some(decode_department_read(
+                &payload,
+                self.config.store_id,
+            )?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn upsert_department(&mut self, dept: &Department) -> Result<(), DriverError> {
+        let payload = encode_department_write(dept)?;
+        let (status, _) = self
+            .send_command(CMD_DEPT_NAMES, ACTION_UPDATE, CVN_DEPT_NAMES, &payload)
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("DEPT_NAMES write failed with status {status}"),
+            })
+        }
+    }
+
+    async fn read_tare(&mut self, cid: u16) -> Result<Option<Tare>, DriverError> {
+        let req = encode_tare_read(cid)?;
+        let (status, payload) = self
+            .send_command(CMD_STORED_TARE, ACTION_REQUEST, CVN_STORED_TARE, &req)
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(Some(decode_tare_read(&payload, self.config.store_id)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn upsert_tare(&mut self, tare: &Tare) -> Result<(), DriverError> {
+        let payload = encode_tare_write(tare)?;
+        let (status, _) = self
+            .send_command(CMD_STORED_TARE, ACTION_UPDATE, CVN_STORED_TARE, &payload)
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("STORED_TARE write failed with status {status}"),
+            })
+        }
+    }
+
+    async fn read_tax_rate(&mut self, tax_id: u8) -> Result<Option<TaxRate>, DriverError> {
+        let req = encode_tax_read(tax_id);
+        let (status, payload) = self
+            .send_command(CMD_TAX_RATES, ACTION_REQUEST, CVN_TAX_RATES, &req)
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(Some(decode_tax_read(&payload, self.config.store_id)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn upsert_tax_rate(&mut self, tax: &TaxRate) -> Result<(), DriverError> {
+        let payload = encode_tax_write(tax);
+        let (status, _) = self
+            .send_command(CMD_TAX_RATES, ACTION_UPDATE, CVN_TAX_RATES, &payload)
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("TAX_RATES write failed with status {status}"),
+            })
+        }
+    }
+
+    async fn read_stored_text(
+        &mut self,
+        text_id: u32,
+        table: u8,
+    ) -> Result<Option<StoredText>, DriverError> {
+        let id_u8 = u8::try_from(text_id).map_err(|_| DriverError::Protocol {
+            code: None,
+            message: format!("XS stored text ID {text_id} out of range"),
+        })?;
+        let (status, payload) = self
+            .send_command(
+                CMD_STORED_TEXT,
+                ACTION_REQUEST,
+                CVN_STORED_TEXT,
+                &[id_u8, table],
+            )
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(Some(decode_stored_text_read(
+                &payload,
+                self.config.store_id,
+            )?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn upsert_stored_text(
+        &mut self,
+        text: &StoredText,
+        table: u8,
+    ) -> Result<(), DriverError> {
+        let payload = encode_stored_text_write(text, table)?;
+        let (status, _) = self
+            .send_command(CMD_STORED_TEXT, ACTION_UPDATE, CVN_STORED_TEXT, &payload)
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("STORED_TEXT write failed with status {status}"),
+            })
+        }
+    }
+
+    async fn read_barcode_format(
+        &mut self,
+        bid: u16,
+    ) -> Result<Option<BarcodeFormat>, DriverError> {
+        let bid_u8 = u8::try_from(bid).map_err(|_| DriverError::Protocol {
+            code: None,
+            message: format!("XS barcode BID {bid} out of range"),
+        })?;
+        let (status, payload) = self
+            .send_command(
+                CMD_BARCODE_FORMATS,
+                ACTION_REQUEST,
+                CVN_BARCODE_FORMATS,
+                &[bid_u8],
+            )
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(Some(decode_barcode_format_read(
+                &payload,
+                self.config.store_id,
+            )?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn upsert_barcode_format(&mut self, fmt: &BarcodeFormat) -> Result<(), DriverError> {
+        let payload = encode_barcode_format_write(fmt)?;
+        let (status, _) = self
+            .send_command(
+                CMD_BARCODE_FORMATS,
+                ACTION_UPDATE,
+                CVN_BARCODE_FORMATS,
+                &payload,
+            )
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("BARCODE_FORMATS write failed with status {status}"),
+            })
+        }
+    }
+
+    async fn read_media_asset(&mut self, media_id: u32) -> Result<Option<MediaAsset>, DriverError> {
+        let meid = u8::try_from(media_id).map_err(|_| DriverError::Protocol {
+            code: None,
+            message: format!("XS media ID {media_id} out of range"),
+        })?;
+        let (status, payload) = self
+            .send_command(CMD_MEDIA, ACTION_REQUEST, CVN_MEDIA, &[meid])
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(Some(decode_media_asset_read(
+                media_id,
+                &payload,
+                self.config.store_id,
+            )?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn read_grand_totals(&mut self, period: u8) -> Result<Option<GrandTotals>, DriverError> {
+        let (status, payload) = self
+            .send_command(
+                CMD_GRAND_TOTALS,
+                ACTION_REQUEST,
+                CVN_TOTALS_BASIC,
+                &[period],
+            )
+            .await?;
+        match status {
+            STATUS_SUCCESS => Ok(Some(decode_grand_totals(period, &payload)?)),
+            STATUS_NO_TOTALS_FOUND => Ok(None),
+            code => Err(DriverError::Protocol {
+                code: Some(i32::from(code)),
+                message: format!("GRAND_TOTALS failed with status {code}"),
+            }),
+        }
+    }
+
+    async fn list_dept_totals(&mut self, period: u8) -> Result<Vec<DeptTotals>, DriverError> {
+        let mut results = Vec::new();
+        let mut start_did: u8 = 0;
+
+        loop {
+            let (status, payload) = self
+                .send_command(
+                    CMD_DEPT_TOTALS,
+                    ACTION_REQUEST,
+                    CVN_TOTALS_BASIC,
+                    &[period, start_did, 1],
+                )
+                .await?;
+
+            match status {
+                STATUS_SUCCESS => {
+                    let item = decode_dept_totals(period, &payload)?;
+                    let next = (item.did as u8).saturating_add(1);
+                    results.push(item);
+                    if next <= start_did || next > 99 {
+                        break;
+                    }
+                    start_did = next;
+                }
+                STATUS_NO_TOTALS_FOUND | STATUS_PLU_LAST_PLU | STATUS_PLU_NOT_FOUND => break,
+                code => {
+                    return Err(DriverError::Protocol {
+                        code: Some(i32::from(code)),
+                        message: format!("DEPT_TOTALS failed with status {code}"),
+                    });
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    async fn read_group_totals(
+        &mut self,
+        period: u8,
+        group_id: u32,
+    ) -> Result<Option<GroupTotals>, DriverError> {
+        let gid = u8::try_from(group_id).unwrap_or(0);
+        let (status, payload) = self
+            .send_command(
+                CMD_GROUP_TOTALS,
+                ACTION_REQUEST,
+                CVN_TOTALS_BASIC,
+                &[period, gid, 0],
+            )
+            .await?;
+        match status {
+            STATUS_SUCCESS => Ok(Some(decode_group_totals(period, group_id, &payload)?)),
+            STATUS_NO_TOTALS_FOUND => Ok(None),
+            code => Err(DriverError::Protocol {
+                code: Some(i32::from(code)),
+                message: format!("GROUP_TOTALS failed with status {code}"),
+            }),
+        }
+    }
+
+    async fn read_operator_totals(
+        &mut self,
+        period: u8,
+        operator_id: u32,
+    ) -> Result<Option<OperatorTotals>, DriverError> {
+        let opid = u8::try_from(operator_id).unwrap_or(0);
+        let (status, payload) = self
+            .send_command(
+                CMD_OPERATOR_TOTALS,
+                ACTION_REQUEST,
+                CVN_TOTALS_BASIC,
+                &[period, opid, 0],
+            )
+            .await?;
+        match status {
+            STATUS_SUCCESS => Ok(Some(decode_operator_totals(period, operator_id, &payload)?)),
+            STATUS_NO_TOTALS_FOUND => Ok(None),
+            code => Err(DriverError::Protocol {
+                code: Some(i32::from(code)),
+                message: format!("OPERATOR_TOTALS failed with status {code}"),
+            }),
+        }
+    }
+
+    async fn read_mach_totals(&mut self, period: u8) -> Result<Option<MachTotals>, DriverError> {
+        let (status, payload) = self
+            .send_command(CMD_MACH_TOTALS, ACTION_REQUEST, CVN_TOTALS_BASIC, &[period])
+            .await?;
+        match status {
+            STATUS_SUCCESS => Ok(Some(decode_mach_totals(period, &payload)?)),
+            STATUS_NO_TOTALS_FOUND => Ok(None),
+            code => Err(DriverError::Protocol {
+                code: Some(i32::from(code)),
+                message: format!("MACH_TOTALS failed with status {code}"),
+            }),
+        }
+    }
+
+    async fn list_plu_totals(&mut self, period: u8) -> Result<Vec<PluTotals>, DriverError> {
+        let from_key = PluKey::new(0, 1)?;
+        let to_key = PluKey::new(XS_MAX_DID, XS_MAX_PLU_NUMBER)?;
+        let mut results = Vec::new();
+        let mut index: u32 = 0;
+
+        loop {
+            let search = encode_plu_search_header(from_key, to_key, 0, index, false)?;
+            let mut req = Vec::with_capacity(42);
+            req.push(period);
+            req.extend_from_slice(&search);
+
+            let (status, payload) = self
+                .send_command(CMD_PLU_TOTALS, ACTION_REQUEST, CVN_PLU_TOTALS, &req)
+                .await?;
+
+            match status {
+                STATUS_SUCCESS => {
+                    results.push(decode_plu_totals(period, &payload)?);
+                    index = index.saturating_add(1);
+                }
+                STATUS_NO_TOTALS_FOUND | STATUS_PLU_LAST_PLU | STATUS_PLU_NOT_FOUND => break,
+                code => {
+                    return Err(DriverError::Protocol {
+                        code: Some(i32::from(code)),
+                        message: format!("PLU_TOTALS failed at index {index} with status {code}"),
+                    });
+                }
+            }
+        }
+
+        Ok(results)
     }
 }
 

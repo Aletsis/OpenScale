@@ -22,21 +22,42 @@ pub const ACTION_UPDATE: u8 = b'U'; // 85
 pub const ACTION_CLEAR: u8 = b'C'; // 67
 
 pub const CMD_CHANGE_PRICE: u16 = 5;
+pub const CMD_STORED_TEXT: u16 = 6;
+pub const CMD_BARCODE_FORMATS: u16 = 7;
+pub const CMD_OPERATOR_TOTALS: u16 = 8;
+pub const CMD_PLU_TOTALS: u16 = 9;
+pub const CMD_GRAND_TOTALS: u16 = 10;
 pub const CMD_PLU_RECORD: u16 = 13;
 pub const CMD_DATE_AND_TIME: u16 = 16;
+pub const CMD_STORED_TARE: u16 = 19;
+pub const CMD_TAX_RATES: u16 = 20;
+pub const CMD_MEDIA: u16 = 37;
+pub const CMD_DEPT_NAMES: u16 = 39;
+pub const CMD_DEPT_TOTALS: u16 = 41;
+pub const CMD_MACH_TOTALS: u16 = 43;
 pub const CMD_VERSION_DETAILS: u16 = 59;
+pub const CMD_GROUP_TOTALS: u16 = 74;
 pub const CMD_ASSETINFO: u16 = 121;
 pub const CMD_MACHNETCONFIG: u16 = 128;
 
 pub const CVN_VERSION_DETAILS: u16 = 0;
 pub const CVN_DATE_AND_TIME: u16 = 11;
+pub const CVN_STORED_TEXT: u16 = 11;
+pub const CVN_TAX_RATES: u16 = 11;
+pub const CVN_DEPT_NAMES: u16 = 11;
+pub const CVN_TOTALS_BASIC: u16 = 11;
 pub const CVN_CHANGE_PRICE: u16 = 3400;
+pub const CVN_BARCODE_FORMATS: u16 = 5000;
+pub const CVN_STORED_TARE: u16 = 5000;
+pub const CVN_MEDIA: u16 = 7200;
 pub const CVN_PLU_RECORD: u16 = 7600;
+pub const CVN_PLU_TOTALS: u16 = 7600;
 pub const CVN_ASSETINFO: u16 = 8000;
 pub const CVN_MACHNETCONFIG: u16 = 8000;
 
 pub const STATUS_SUCCESS: i16 = 0;
 pub const STATUS_BUSY: i16 = -1119;
+pub const STATUS_NO_TOTALS_FOUND: i16 = -1125;
 pub const STATUS_PLU_NOT_FOUND: i16 = -1203;
 pub const STATUS_PLU_LAST_PLU: i16 = -1205;
 

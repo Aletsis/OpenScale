@@ -2609,6 +2609,8 @@ dependencies = [
  "encoding_rs",
  "openscale-domain",
  "openscale-driver",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "uuid",
