@@ -172,6 +172,107 @@ export interface BarcodeFormat {
   meta: SyncMetadata;
 }
 
+export interface LabelFormat {
+  id: string;
+  pfid: number;
+  name: string;
+  width_tenths_mm: number;
+  height_tenths_mm: number;
+  definition_json: string;
+  raw_binary: number[] | null;
+  meta: SyncMetadata;
+}
+
+export type ImportCategory =
+  | "plu"
+  | "department"
+  | "tare"
+  | "tax_rate"
+  | "stored_text"
+  | "barcode_format"
+  | "label_format";
+
+export interface ImportSelection {
+  plus: boolean;
+  departments: boolean;
+  tares: boolean;
+  tax_rates: boolean;
+  stored_texts: boolean;
+  barcode_formats: boolean;
+  label_formats: boolean;
+}
+
+export interface ImportCategoryCounts {
+  plus: number;
+  departments: number;
+  tares: number;
+  tax_rates: number;
+  stored_texts: number;
+  barcode_formats: number;
+  label_formats: number;
+}
+
+export interface FieldDiff {
+  field: string;
+  local_value: string;
+  remote_value: string;
+}
+
+export interface ImportConflict {
+  category: ImportCategory;
+  key: string;
+  label: string;
+  diffs: FieldDiff[];
+}
+
+export interface ScaleImportPreview {
+  scale_id: string;
+  new_plus: Plu[];
+  new_departments: Department[];
+  new_tares: Tare[];
+  new_tax_rates: TaxRate[];
+  new_stored_texts: StoredText[];
+  new_barcode_formats: BarcodeFormat[];
+  new_label_formats: LabelFormat[];
+  conflict_plus: Plu[];
+  conflict_departments: Department[];
+  conflict_tares: Tare[];
+  conflict_tax_rates: TaxRate[];
+  conflict_stored_texts: StoredText[];
+  conflict_barcode_formats: BarcodeFormat[];
+  conflict_label_formats: LabelFormat[];
+  conflicts: ImportConflict[];
+  unchanged_counts: ImportCategoryCounts;
+  unsupported_categories: ImportCategory[];
+}
+
+export interface ScaleImportApplyRequest {
+  scale_id: string;
+  plus: Plu[];
+  departments: Department[];
+  tares: Tare[];
+  tax_rates: TaxRate[];
+  stored_texts: StoredText[];
+  barcode_formats: BarcodeFormat[];
+  label_formats: LabelFormat[];
+  kept_local_conflicts: number;
+  skipped_unchanged: number;
+}
+
+export interface ScaleImportResult {
+  scale_id: string;
+  imported_plus: number;
+  imported_departments: number;
+  imported_tares: number;
+  imported_tax_rates: number;
+  imported_stored_texts: number;
+  imported_barcode_formats: number;
+  imported_label_formats: number;
+  total_imported: number;
+  kept_local_conflicts: number;
+  skipped_unchanged: number;
+}
+
 export interface GrandTotals {
   period: number;
   counter_sales: number;

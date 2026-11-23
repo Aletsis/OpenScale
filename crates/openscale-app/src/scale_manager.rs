@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use chrono::Utc;
 use openscale_domain::{
-    BarcodeFormat, Department, MoneyCents, Plu, PluKey, Scale, ScaleFamily, ScaleSalesReport,
-    StoredText, Tare, TaxRate,
+    BarcodeFormat, Department, LabelFormat, MoneyCents, Plu, PluKey, Scale, ScaleFamily,
+    ScaleSalesReport, StoredText, Tare, TaxRate,
 };
 use openscale_driver::{
     ConnectionState, DriverCapabilities, DriverError, ScaleDateTime, ScaleDriver, ScaleEvent,
@@ -45,6 +45,13 @@ enum ScaleCommand {
     UpsertTaxRate(TaxRate, oneshot::Sender<Result<(), DriverError>>),
     UpsertStoredText(StoredText, u8, oneshot::Sender<Result<(), DriverError>>),
     UpsertBarcodeFormat(BarcodeFormat, oneshot::Sender<Result<(), DriverError>>),
+    UpsertLabelFormat(LabelFormat, oneshot::Sender<Result<(), DriverError>>),
+    ListDepartments(oneshot::Sender<Result<Vec<Department>, DriverError>>),
+    ListTares(oneshot::Sender<Result<Vec<Tare>, DriverError>>),
+    ListTaxRates(oneshot::Sender<Result<Vec<TaxRate>, DriverError>>),
+    ListStoredTexts(oneshot::Sender<Result<Vec<StoredText>, DriverError>>),
+    ListBarcodeFormats(oneshot::Sender<Result<Vec<BarcodeFormat>, DriverError>>),
+    ListLabelFormats(oneshot::Sender<Result<Vec<LabelFormat>, DriverError>>),
     CaptureSalesReport(u8, oneshot::Sender<Result<ScaleSalesReport, DriverError>>),
 }
 
@@ -225,6 +232,69 @@ impl ScaleHandle {
         Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
     }
 
+    pub async fn upsert_label_format(&self, fmt: LabelFormat) -> Result<(), AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::UpsertLabelFormat(fmt, tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn list_departments(&self) -> Result<Vec<Department>, AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::ListDepartments(tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn list_tares(&self) -> Result<Vec<Tare>, AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::ListTares(tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn list_tax_rates(&self) -> Result<Vec<TaxRate>, AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::ListTaxRates(tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn list_stored_texts(&self) -> Result<Vec<StoredText>, AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::ListStoredTexts(tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn list_barcode_formats(&self) -> Result<Vec<BarcodeFormat>, AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::ListBarcodeFormats(tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn list_label_formats(&self) -> Result<Vec<LabelFormat>, AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::ListLabelFormats(tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
     pub async fn capture_sales_report(&self, period: u8) -> Result<ScaleSalesReport, AppError> {
         let (tx, rx) = oneshot::channel();
         self.tx
@@ -400,6 +470,27 @@ async fn run_scale_actor(
             }
             ScaleCommand::UpsertBarcodeFormat(fmt, reply) => {
                 let _ = reply.send(driver.upsert_barcode_format(&fmt).await);
+            }
+            ScaleCommand::UpsertLabelFormat(fmt, reply) => {
+                let _ = reply.send(driver.upsert_label_format(&fmt).await);
+            }
+            ScaleCommand::ListDepartments(reply) => {
+                let _ = reply.send(driver.list_departments().await);
+            }
+            ScaleCommand::ListTares(reply) => {
+                let _ = reply.send(driver.list_tares().await);
+            }
+            ScaleCommand::ListTaxRates(reply) => {
+                let _ = reply.send(driver.list_tax_rates().await);
+            }
+            ScaleCommand::ListStoredTexts(reply) => {
+                let _ = reply.send(driver.list_stored_texts().await);
+            }
+            ScaleCommand::ListBarcodeFormats(reply) => {
+                let _ = reply.send(driver.list_barcode_formats().await);
+            }
+            ScaleCommand::ListLabelFormats(reply) => {
+                let _ = reply.send(driver.list_label_formats().await);
             }
             ScaleCommand::CaptureSalesReport(period, reply) => {
                 let res = async {

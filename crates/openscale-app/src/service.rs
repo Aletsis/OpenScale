@@ -3,8 +3,8 @@ use std::time::Duration;
 use chrono::Utc;
 use openscale_domain::types::new_id;
 use openscale_domain::{
-    BarcodeFormat, Department, Plu, PluKey, SalesSnapshot, Scale, ScaleSalesReport, StoredText,
-    SyncMetadata, Tare, TaxRate,
+    BarcodeFormat, Department, LabelFormat, Plu, PluKey, SalesSnapshot, Scale, ScaleSalesReport,
+    StoredText, SyncMetadata, Tare, TaxRate,
 };
 use openscale_driver::DiscoveredScale;
 use openscale_storage::repos::{
@@ -16,6 +16,11 @@ use uuid::Uuid;
 
 use crate::discovery::discover_all_scales;
 use crate::error::AppError;
+use crate::import_engine::{
+    ImportSelection, ScaleImportApplyRequest, ScaleImportPreview, ScaleImportResult,
+    apply_scale_import as apply_scale_import_impl,
+    preview_import_from_scale as preview_import_from_scale_impl,
+};
 use crate::scale_manager::ScaleManager;
 use crate::sync_engine::{SyncEngine, SyncMode, SyncReport};
 
@@ -161,6 +166,34 @@ impl OpenScaleApp {
             .upsert_barcode_format(&fmt)
             .await?;
         Ok(fmt)
+    }
+
+    pub async fn list_label_formats(&self) -> Result<Vec<LabelFormat>, AppError> {
+        Ok(self
+            .master_tables_repo()
+            .list_label_formats(self.store_id)
+            .await?)
+    }
+
+    pub async fn upsert_label_format(&self, fmt: LabelFormat) -> Result<LabelFormat, AppError> {
+        self.master_tables_repo().upsert_label_format(&fmt).await?;
+        Ok(fmt)
+    }
+
+    pub async fn preview_import_from_scale(
+        &self,
+        scale_id: Uuid,
+        selection: ImportSelection,
+    ) -> Result<ScaleImportPreview, AppError> {
+        preview_import_from_scale_impl(&self.db, &self.scales, self.store_id, scale_id, &selection)
+            .await
+    }
+
+    pub async fn apply_scale_import(
+        &self,
+        request: ScaleImportApplyRequest,
+    ) -> Result<ScaleImportResult, AppError> {
+        apply_scale_import_impl(&self.db, request).await
     }
 
     /// Pushes all active local master tables to a target scale.

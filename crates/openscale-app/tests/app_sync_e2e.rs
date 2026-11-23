@@ -2,12 +2,14 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use openscale_app::{OpenScaleApp, SyncMode};
+use openscale_app::{
+    ImportCategory, ImportSelection, OpenScaleApp, ScaleImportApplyRequest, SyncMode,
+};
 use openscale_domain::types::new_id;
 use openscale_domain::{
-    BarcodeFormat, Department, DeptTotals, GrandTotals, MachTotals, MoneyCents, Plu, PluKey,
-    PluTotals, ProductType, Scale, ScaleFamily, ScaleStatus, StoredText, SyncMetadata, Tare,
-    TaxRate,
+    BarcodeFormat, Department, DeptTotals, GrandTotals, LabelFormat, MachTotals, MoneyCents, Plu,
+    PluKey, PluTotals, ProductType, Scale, ScaleFamily, ScaleStatus, StoredText, SyncMetadata,
+    Tare, TaxRate,
 };
 use openscale_driver::{
     ConnectionState, DriverCapabilities, DriverError, ScaleDateTime, ScaleDriver, ScaleEvent,
@@ -18,6 +20,12 @@ use openscale_storage::{DEFAULT_LOCAL_STORE_ID, Database};
 #[derive(Default)]
 struct InMemoryDriverState {
     plus: BTreeMap<PluKey, Plu>,
+    departments: Vec<Department>,
+    tares: Vec<Tare>,
+    tax_rates: Vec<TaxRate>,
+    stored_texts: Vec<StoredText>,
+    barcode_formats: Vec<BarcodeFormat>,
+    label_formats: Vec<LabelFormat>,
     upserts: usize,
 }
 
@@ -133,6 +141,30 @@ impl ScaleDriver for MockScaleDriver {
 
     async fn upsert_barcode_format(&mut self, _fmt: &BarcodeFormat) -> Result<(), DriverError> {
         Ok(())
+    }
+
+    async fn list_departments(&mut self) -> Result<Vec<Department>, DriverError> {
+        Ok(self.state.lock().unwrap().departments.clone())
+    }
+
+    async fn list_tares(&mut self) -> Result<Vec<Tare>, DriverError> {
+        Ok(self.state.lock().unwrap().tares.clone())
+    }
+
+    async fn list_tax_rates(&mut self) -> Result<Vec<TaxRate>, DriverError> {
+        Ok(self.state.lock().unwrap().tax_rates.clone())
+    }
+
+    async fn list_stored_texts(&mut self) -> Result<Vec<StoredText>, DriverError> {
+        Ok(self.state.lock().unwrap().stored_texts.clone())
+    }
+
+    async fn list_barcode_formats(&mut self) -> Result<Vec<BarcodeFormat>, DriverError> {
+        Ok(self.state.lock().unwrap().barcode_formats.clone())
+    }
+
+    async fn list_label_formats(&mut self) -> Result<Vec<LabelFormat>, DriverError> {
+        Ok(self.state.lock().unwrap().label_formats.clone())
     }
 
     async fn read_grand_totals(&mut self, period: u8) -> Result<Option<GrandTotals>, DriverError> {
@@ -417,6 +449,241 @@ async fn master_tables_sync_and_sales_snapshots_e2e() {
     assert_eq!(by_scale.len(), 1);
     let all = app.list_sales_snapshots(None, 10).await.unwrap();
     assert_eq!(all.len(), 1);
+
+    app.scales.unregister(scale_id).await;
+}
+
+#[tokio::test]
+async fn selective_import_with_conflict_resolution_e2e() {
+    let db = Database::connect_in_memory().await.unwrap();
+    let app = OpenScaleApp::new(db);
+
+    let scale_id = new_id();
+    let scale = Scale {
+        id: scale_id,
+        group_id: None,
+        name: "XS Import Test".to_string(),
+        family: ScaleFamily::AveryBerkelXs,
+        ip_address: "192.168.9.200".to_string(),
+        data_port: 3001,
+        service_port: Some(28822),
+        serial_number: None,
+        model: Some("XS200".to_string()),
+        firmware_version: Some("4.1.7.0".to_string()),
+        mac_address: None,
+        status: ScaleStatus::Online,
+        last_seen_at: None,
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    };
+    app.scale_repo().upsert(&scale).await.unwrap();
+
+    // Seed local DB with 1 matching PLU, 1 conflicting PLU, 1 conflicting Department, and 1 conflicting Tare
+    app.upsert_plu(sample_plu(1, "POLLO ENTERO", 6500))
+        .await
+        .unwrap();
+    app.upsert_plu(sample_plu(2, "PECHUGA LOCAL", 11000))
+        .await
+        .unwrap();
+    app.upsert_department(Department {
+        id: new_id(),
+        did: 1,
+        name: "CARNICERIA LOCAL".to_string(),
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    })
+    .await
+    .unwrap();
+    app.upsert_tare(Tare {
+        id: new_id(),
+        cid: 5,
+        name: "Charola Chica".to_string(),
+        weight_grams: 15,
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    })
+    .await
+    .unwrap();
+
+    // Seed remote scale with:
+    // - PLU 1:1 (identical)
+    // - PLU 1:2 (differs: price & description)
+    // - PLU 1:3 (brand new)
+    // - Dept 1 (differs) + Dept 2 (new)
+    // - Tare 5 (differs: 25g vs 15g) + Tare 6 (new)
+    // - Tax 1 (new), StoredText 1 (new), BarcodeFormat 1 (new), LabelFormat 1 (new)
+    let state = Arc::new(Mutex::new(InMemoryDriverState::default()));
+    {
+        let mut st = state.lock().unwrap();
+        let p1 = sample_plu(1, "POLLO ENTERO", 6500);
+        let p2 = sample_plu(2, "PECHUGA BASCULA", 12500);
+        let p3 = sample_plu(3, "PIERNA NUEVA", 5400);
+        st.plus.insert(p1.key, p1);
+        st.plus.insert(p2.key, p2);
+        st.plus.insert(p3.key, p3);
+
+        st.departments.push(Department {
+            id: new_id(),
+            did: 1,
+            name: "CARNICERIA BASCULA".to_string(),
+            meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+        });
+        st.departments.push(Department {
+            id: new_id(),
+            did: 2,
+            name: "CREMERIA".to_string(),
+            meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+        });
+
+        st.tares.push(Tare {
+            id: new_id(),
+            cid: 5,
+            name: "Container 5".to_string(),
+            weight_grams: 25,
+            meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+        });
+        st.tares.push(Tare {
+            id: new_id(),
+            cid: 6,
+            name: "Container 6".to_string(),
+            weight_grams: 40,
+            meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+        });
+
+        st.tax_rates.push(TaxRate {
+            id: new_id(),
+            tax_id: 1,
+            name: "Tax 1".to_string(),
+            rate_basis_points: 1600,
+            meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+        });
+
+        st.stored_texts.push(StoredText {
+            id: new_id(),
+            text_id: 1,
+            title: "Message 1".to_string(),
+            content: "MANTENER FRIO".to_string(),
+            meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+        });
+
+        st.barcode_formats.push(BarcodeFormat {
+            id: new_id(),
+            bid: 1,
+            name: "Barcode 1".to_string(),
+            definition_json: r#"{"bmc":0,"bt":3,"bpd":1,"subtype":3,"template":"2NNAAAAWWWWWC"}"#
+                .to_string(),
+            meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+        });
+
+        st.label_formats.push(LabelFormat {
+            id: new_id(),
+            pfid: 1,
+            name: "STD 59x40".to_string(),
+            width_tenths_mm: 590,
+            height_tenths_mm: 0,
+            definition_json: r#"{"active":true,"fields":[]}"#.to_string(),
+            raw_binary: Some(vec![0u8; 898]),
+            meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+        });
+    }
+
+    app.scales
+        .register_driver(
+            scale_id,
+            Box::new(MockScaleDriver {
+                state: state.clone(),
+            }),
+        )
+        .await;
+
+    let preview = app
+        .preview_import_from_scale(scale_id, ImportSelection::default())
+        .await
+        .unwrap();
+
+    // Verify new, unchanged, and conflict buckets
+    assert_eq!(preview.unchanged_counts.plus, 1);
+    assert_eq!(preview.new_plus.len(), 1);
+    assert_eq!(preview.conflict_plus.len(), 1);
+    assert_eq!(preview.new_departments.len(), 1);
+    assert_eq!(preview.conflict_departments.len(), 1);
+    assert_eq!(preview.new_tares.len(), 1);
+    assert_eq!(preview.conflict_tares.len(), 1);
+    // Remote auto-generated tare name should preserve local custom name on conflict
+    assert_eq!(preview.conflict_tares[0].name, "Charola Chica");
+    assert_eq!(preview.new_tax_rates.len(), 1);
+    assert_eq!(preview.new_stored_texts.len(), 1);
+    assert_eq!(preview.new_barcode_formats.len(), 1);
+    assert_eq!(preview.new_label_formats.len(), 1);
+
+    assert_eq!(preview.conflicts.len(), 3);
+    assert!(
+        preview
+            .conflicts
+            .iter()
+            .any(|c| c.category == ImportCategory::Plu && c.key == "1:2" && c.diffs.len() == 2)
+    );
+    assert!(
+        preview
+            .conflicts
+            .iter()
+            .any(|c| c.category == ImportCategory::Department && c.key == "1")
+    );
+    assert!(
+        preview
+            .conflicts
+            .iter()
+            .any(|c| c.category == ImportCategory::Tare && c.key == "5")
+    );
+
+    // Resolve conflicts:
+    // - PLU 1:2 -> KEEP LOCAL
+    // - Dept 1 -> USE SCALE
+    // - Tare 5 -> USE SCALE
+    let req = ScaleImportApplyRequest {
+        scale_id,
+        plus: preview.new_plus.clone(), // omit conflict_plus[0] => keep local
+        departments: [preview.new_departments.clone(), preview.conflict_departments.clone()]
+            .concat(),
+        tares: [preview.new_tares.clone(), preview.conflict_tares.clone()].concat(),
+        tax_rates: preview.new_tax_rates.clone(),
+        stored_texts: preview.new_stored_texts.clone(),
+        barcode_formats: preview.new_barcode_formats.clone(),
+        label_formats: preview.new_label_formats.clone(),
+        kept_local_conflicts: 1,
+        skipped_unchanged: preview.unchanged_counts.total(),
+    };
+
+    let result = app.apply_scale_import(req).await.unwrap();
+    assert_eq!(result.imported_plus, 1);
+    assert_eq!(result.imported_departments, 2);
+    assert_eq!(result.imported_tares, 2);
+    assert_eq!(result.imported_tax_rates, 1);
+    assert_eq!(result.imported_stored_texts, 1);
+    assert_eq!(result.imported_barcode_formats, 1);
+    assert_eq!(result.imported_label_formats, 1);
+    assert_eq!(result.kept_local_conflicts, 1);
+    assert_eq!(result.skipped_unchanged, 1);
+
+    // Verify local DB reflects exact user choices
+    let plu2 = app.get_plu(PluKey::new(1, 2).unwrap()).await.unwrap().unwrap();
+    assert_eq!(plu2.description, "PECHUGA LOCAL");
+    assert_eq!(plu2.price_1, MoneyCents(11000));
+
+    let plu3 = app.get_plu(PluKey::new(1, 3).unwrap()).await.unwrap().unwrap();
+    assert_eq!(plu3.description, "PIERNA NUEVA");
+
+    let depts = app.list_departments().await.unwrap();
+    assert_eq!(depts.len(), 2);
+    assert_eq!(depts.iter().find(|d| d.did == 1).unwrap().name, "CARNICERIA BASCULA");
+
+    let tares = app.list_tares().await.unwrap();
+    assert_eq!(tares.len(), 2);
+    let tare5 = tares.iter().find(|t| t.cid == 5).unwrap();
+    assert_eq!(tare5.weight_grams, 25);
+    assert_eq!(tare5.name, "Charola Chica");
+
+    assert_eq!(app.list_tax_rates().await.unwrap().len(), 1);
+    assert_eq!(app.list_stored_texts().await.unwrap().len(), 1);
+    assert_eq!(app.list_barcode_formats().await.unwrap().len(), 1);
+    assert_eq!(app.list_label_formats().await.unwrap().len(), 1);
 
     app.scales.unregister(scale_id).await;
 }

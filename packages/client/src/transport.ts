@@ -1,9 +1,13 @@
 import type {
   DiscoveredScale,
+  ImportSelection,
   Plu,
   PluKey,
   Scale,
   ScaleEvent,
+  ScaleImportApplyRequest,
+  ScaleImportPreview,
+  ScaleImportResult,
   SyncMode,
   SyncReport,
 } from "./types.js";
@@ -29,6 +33,8 @@ export interface OpenScaleTransport {
 
   // Synchronization
   importFromScale(scaleId: string): Promise<number>;
+  previewImportFromScale(scaleId: string, selection: ImportSelection): Promise<ScaleImportPreview>;
+  applyScaleImport(request: ScaleImportApplyRequest): Promise<ScaleImportResult>;
   syncScale(scaleId: string, mode: SyncMode): Promise<SyncReport>;
 
   // Real-time events
@@ -114,6 +120,26 @@ export class HttpWsTransport implements OpenScaleTransport {
     return this.request<number>(`/api/v1/scales/${encodeURIComponent(scaleId)}/import`, {
       method: "POST",
     });
+  }
+
+  previewImportFromScale(scaleId: string, selection: ImportSelection): Promise<ScaleImportPreview> {
+    return this.request<ScaleImportPreview>(
+      `/api/v1/scales/${encodeURIComponent(scaleId)}/import/preview`,
+      {
+        method: "POST",
+        body: JSON.stringify(selection),
+      },
+    );
+  }
+
+  applyScaleImport(request: ScaleImportApplyRequest): Promise<ScaleImportResult> {
+    return this.request<ScaleImportResult>(
+      `/api/v1/scales/${encodeURIComponent(request.scale_id)}/import/apply`,
+      {
+        method: "POST",
+        body: JSON.stringify(request),
+      },
+    );
   }
 
   syncScale(scaleId: string, mode: SyncMode): Promise<SyncReport> {

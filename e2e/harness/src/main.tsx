@@ -52,6 +52,54 @@ const mockTransport: OpenScaleTransport = {
   upsertPlu: async (p) => p,
   deletePlu: async () => true,
   importFromScale: async () => 1,
+  previewImportFromScale: async (scaleId) => ({
+    scale_id: scaleId,
+    new_plus: [],
+    new_departments: [],
+    new_tares: [],
+    new_tax_rates: [],
+    new_stored_texts: [],
+    new_barcode_formats: [],
+    new_label_formats: [],
+    conflict_plus: [],
+    conflict_departments: [],
+    conflict_tares: [],
+    conflict_tax_rates: [],
+    conflict_stored_texts: [],
+    conflict_barcode_formats: [],
+    conflict_label_formats: [],
+    conflicts: [],
+    unchanged_counts: {
+      plus: 0,
+      departments: 0,
+      tares: 0,
+      tax_rates: 0,
+      stored_texts: 0,
+      barcode_formats: 0,
+      label_formats: 0,
+    },
+    unsupported_categories: [],
+  }),
+  applyScaleImport: async (req) => ({
+    scale_id: req.scale_id,
+    imported_plus: req.plus.length,
+    imported_departments: req.departments.length,
+    imported_tares: req.tares.length,
+    imported_tax_rates: req.tax_rates.length,
+    imported_stored_texts: req.stored_texts.length,
+    imported_barcode_formats: req.barcode_formats.length,
+    imported_label_formats: req.label_formats.length,
+    total_imported:
+      req.plus.length +
+      req.departments.length +
+      req.tares.length +
+      req.tax_rates.length +
+      req.stored_texts.length +
+      req.barcode_formats.length +
+      req.label_formats.length,
+    kept_local_conflicts: req.kept_local_conflicts,
+    skipped_unchanged: req.skipped_unchanged,
+  }),
   syncScale: async (scaleId, mode) => ({
     scale_id: scaleId,
     mode,

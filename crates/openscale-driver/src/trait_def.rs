@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use openscale_domain::{
-    BarcodeFormat, Department, DeptTotals, GrandTotals, GroupTotals, MachTotals, MediaAsset,
-    MoneyCents, OperatorTotals, Plu, PluKey, PluTotals, StoredText, Tare, TaxRate,
+    BarcodeFormat, Department, DeptTotals, GrandTotals, GroupTotals, LabelFormat, MachTotals,
+    MediaAsset, MoneyCents, OperatorTotals, Plu, PluKey, PluTotals, StoredText, Tare, TaxRate,
 };
 
 use crate::capabilities::DriverCapabilities;
@@ -118,6 +118,41 @@ pub trait ScaleDriver: Send + Sync {
         _media_id: u32,
     ) -> Result<Option<MediaAsset>, DriverError> {
         Err(DriverError::Unsupported("read_media_asset"))
+    }
+
+    async fn read_label_format(
+        &mut self,
+        _pfid: u16,
+    ) -> Result<Option<LabelFormat>, DriverError> {
+        Err(DriverError::Unsupported("read_label_format"))
+    }
+
+    async fn upsert_label_format(&mut self, _fmt: &LabelFormat) -> Result<(), DriverError> {
+        Err(DriverError::Unsupported("upsert_label_format"))
+    }
+
+    async fn list_departments(&mut self) -> Result<Vec<Department>, DriverError> {
+        Err(DriverError::Unsupported("list_departments"))
+    }
+
+    async fn list_tares(&mut self) -> Result<Vec<Tare>, DriverError> {
+        Err(DriverError::Unsupported("list_tares"))
+    }
+
+    async fn list_tax_rates(&mut self) -> Result<Vec<TaxRate>, DriverError> {
+        Err(DriverError::Unsupported("list_tax_rates"))
+    }
+
+    async fn list_stored_texts(&mut self) -> Result<Vec<StoredText>, DriverError> {
+        Err(DriverError::Unsupported("list_stored_texts"))
+    }
+
+    async fn list_barcode_formats(&mut self) -> Result<Vec<BarcodeFormat>, DriverError> {
+        Err(DriverError::Unsupported("list_barcode_formats"))
+    }
+
+    async fn list_label_formats(&mut self) -> Result<Vec<LabelFormat>, DriverError> {
+        Err(DriverError::Unsupported("list_label_formats"))
     }
 
     // --- Sales & Totals (v0.2) ---

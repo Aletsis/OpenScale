@@ -1,10 +1,11 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use openscale_domain::types::{XS_MAX_DID, XS_MAX_PLU_NUMBER};
+use openscale_domain::types::{XS_MAX_DID, XS_MAX_PLU_NUMBER, new_id};
 use openscale_domain::{
-    BarcodeFormat, Department, DeptTotals, GrandTotals, GroupTotals, MachTotals, MediaAsset,
-    MoneyCents, OperatorTotals, Plu, PluKey, PluTotals, ScaleFamily, StoredText, Tare, TaxRate,
+    BarcodeFormat, Department, DeptTotals, GrandTotals, GroupTotals, LabelFormat, MachTotals,
+    MediaAsset, MoneyCents, OperatorTotals, Plu, PluKey, PluTotals, ScaleFamily, StoredText,
+    SyncMetadata, Tare, TaxRate,
 };
 use openscale_driver::{DriverCapabilities, DriverError, ScaleDateTime, ScaleDriver, ScaleInfo};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -19,10 +20,10 @@ use crate::codec::{
 use crate::label_formats::LabelFormatRecord;
 use crate::machine_params::MachineParameters;
 use crate::master_tables::{
-    decode_barcode_format_read, decode_department_read, decode_media_asset_read,
-    decode_stored_text_read, decode_tare_read, decode_tax_read, encode_barcode_format_write,
-    encode_department_write, encode_stored_text_write, encode_tare_read, encode_tare_write,
-    encode_tax_read, encode_tax_write,
+    XsBarcodeFormatDef, decode_barcode_format_read, decode_department_read,
+    decode_media_asset_read, decode_stored_text_read, decode_tare_read, decode_tax_read,
+    encode_barcode_format_write, encode_department_write, encode_stored_text_write,
+    encode_tare_read, encode_tare_write, encode_tax_read, encode_tax_write,
 };
 use crate::protocol::{
     ACTION_CLEAR, ACTION_REQUEST, ACTION_UPDATE, AbCmdHeader, CMD_ASSETINFO, CMD_BARCODE_FORMATS,
@@ -799,6 +800,139 @@ impl ScaleDriver for XsDriver {
         } else {
             Ok(None)
         }
+    }
+
+    async fn read_label_format(&mut self, pfid: u16) -> Result<Option<LabelFormat>, DriverError> {
+        let pfid_u8 = u8::try_from(pfid).map_err(|_| DriverError::Protocol {
+            code: None,
+            message: format!("XS label format PFID {pfid} out of range (0..=99)"),
+        })?;
+        match Self::read_label_format(self, pfid_u8).await {
+            Ok(rec) => {
+                if !rec.active && rec.name.trim().is_empty() && rec.fields.is_empty() {
+                    return Ok(None);
+                }
+                let definition_json = serde_json::to_string(&serde_json::json!({
+                    "orientation": rec.orientation,
+                    "active": rec.active,
+                    "width_hundredths_mm": rec.width_hundredths_mm,
+                    "fields": rec.fields,
+                }))
+                .map_err(|e| DriverError::Protocol {
+                    code: None,
+                    message: format!("failed to serialize label format definition: {e}"),
+                })?;
+                Ok(Some(LabelFormat {
+                    id: new_id(),
+                    pfid: u16::from(rec.pfid),
+                    name: if rec.name.trim().is_empty() {
+                        format!("Label {pfid}")
+                    } else {
+                        rec.name
+                    },
+                    width_tenths_mm: rec.width_hundredths_mm / 10,
+                    height_tenths_mm: 0,
+                    definition_json,
+                    raw_binary: Some(rec.raw),
+                    meta: SyncMetadata::new(self.config.store_id),
+                }))
+            }
+            Err(DriverError::Protocol { .. }) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn upsert_label_format(&mut self, fmt: &LabelFormat) -> Result<(), DriverError> {
+        let pfid_u8 = u8::try_from(fmt.pfid).map_err(|_| DriverError::Protocol {
+            code: None,
+            message: format!("XS label format PFID {} out of range (0..=99)", fmt.pfid),
+        })?;
+        let raw = fmt
+            .raw_binary
+            .as_ref()
+            .ok_or_else(|| DriverError::Protocol {
+                code: None,
+                message: "XS label format requires raw 898-byte binary image".to_string(),
+            })?;
+        let mut rec = LabelFormatRecord::decode(raw)?;
+        rec.pfid = pfid_u8;
+        if !fmt.name.trim().is_empty() {
+            rec.name = fmt.name.clone();
+        }
+        Self::write_label_format(self, &rec).await
+    }
+
+    async fn list_departments(&mut self) -> Result<Vec<Department>, DriverError> {
+        let mut items = Vec::new();
+        for did in 0u32..=99 {
+            if let Some(dept) = self.read_department(did).await?
+                && !dept.name.trim().is_empty()
+            {
+                items.push(dept);
+            }
+        }
+        Ok(items)
+    }
+
+    async fn list_tares(&mut self) -> Result<Vec<Tare>, DriverError> {
+        let mut items = Vec::new();
+        for cid in 0u16..=39 {
+            if let Some(tare) = self.read_tare(cid).await?
+                && tare.weight_grams > 0
+            {
+                items.push(tare);
+            }
+        }
+        Ok(items)
+    }
+
+    async fn list_tax_rates(&mut self) -> Result<Vec<TaxRate>, DriverError> {
+        let mut items = Vec::new();
+        for tax_id in 0u8..=9 {
+            if let Some(tax) = self.read_tax_rate(tax_id).await?
+                && tax.rate_basis_points > 0
+            {
+                items.push(tax);
+            }
+        }
+        Ok(items)
+    }
+
+    async fn list_stored_texts(&mut self) -> Result<Vec<StoredText>, DriverError> {
+        let mut items = Vec::new();
+        for text_id in 0u32..=99 {
+            if let Some(text) = self.read_stored_text(text_id, 0).await?
+                && !text.content.trim().is_empty()
+            {
+                items.push(text);
+            }
+        }
+        Ok(items)
+    }
+
+    async fn list_barcode_formats(&mut self) -> Result<Vec<BarcodeFormat>, DriverError> {
+        let mut items = Vec::new();
+        for bid in 1u16..=32 {
+            if let Some(fmt) = self.read_barcode_format(bid).await? {
+                let has_template = serde_json::from_str::<XsBarcodeFormatDef>(&fmt.definition_json)
+                    .map(|def| !def.template.trim().is_empty())
+                    .unwrap_or(false);
+                if has_template {
+                    items.push(fmt);
+                }
+            }
+        }
+        Ok(items)
+    }
+
+    async fn list_label_formats(&mut self) -> Result<Vec<LabelFormat>, DriverError> {
+        let mut items = Vec::new();
+        for pfid in 0u16..=99 {
+            if let Some(fmt) = ScaleDriver::read_label_format(self, pfid).await? {
+                items.push(fmt);
+            }
+        }
+        Ok(items)
     }
 
     async fn read_grand_totals(&mut self, period: u8) -> Result<Option<GrandTotals>, DriverError> {

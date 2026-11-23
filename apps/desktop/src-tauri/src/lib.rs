@@ -2,10 +2,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use openscale_app::{OpenScaleApp, SyncMode, SyncReport};
+use openscale_app::{
+    ImportSelection, OpenScaleApp, ScaleImportApplyRequest, ScaleImportPreview, ScaleImportResult,
+    SyncMode, SyncReport,
+};
 use openscale_domain::{
-    BarcodeFormat, Department, Plu, PluKey, SalesSnapshot, Scale, ScaleSalesReport, StoredText,
-    Tare, TaxRate,
+    BarcodeFormat, Department, LabelFormat, Plu, PluKey, SalesSnapshot, Scale, ScaleSalesReport,
+    StoredText, Tare, TaxRate,
 };
 use openscale_driver::{DiscoveredScale, LcdFrame, ScaleDriver};
 use openscale_driver_xs::{
@@ -112,6 +115,54 @@ async fn import_from_scale(
         .app
         .sync
         .import_from_scale(scale_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn preview_import_from_scale(
+    state: State<'_, DesktopState>,
+    scale_id: Uuid,
+    selection: ImportSelection,
+) -> Result<ScaleImportPreview, String> {
+    state
+        .app
+        .preview_import_from_scale(scale_id, selection)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn apply_scale_import(
+    state: State<'_, DesktopState>,
+    request: ScaleImportApplyRequest,
+) -> Result<ScaleImportResult, String> {
+    state
+        .app
+        .apply_scale_import(request)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_label_formats(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<LabelFormat>, String> {
+    state
+        .app
+        .list_label_formats()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn upsert_label_format(
+    state: State<'_, DesktopState>,
+    fmt: LabelFormat,
+) -> Result<LabelFormat, String> {
+    state
+        .app
+        .upsert_label_format(fmt)
         .await
         .map_err(|e| e.to_string())
 }
@@ -462,6 +513,8 @@ pub fn run() {
             upsert_plu,
             delete_plu,
             import_from_scale,
+            preview_import_from_scale,
+            apply_scale_import,
             sync_scale,
             list_departments,
             upsert_department,
@@ -473,6 +526,8 @@ pub fn run() {
             upsert_stored_text,
             list_barcode_formats,
             upsert_barcode_format,
+            list_label_formats,
+            upsert_label_format,
             sync_master_tables,
             capture_sales_snapshot,
             list_sales_snapshots,

@@ -1,10 +1,14 @@
 import type {
   DiscoveredScale,
+  ImportSelection,
   OpenScaleTransport,
   Plu,
   PluKey,
   Scale,
   ScaleEvent,
+  ScaleImportApplyRequest,
+  ScaleImportPreview,
+  ScaleImportResult,
   SyncMode,
   SyncReport,
   Unsubscribe,
@@ -46,6 +50,14 @@ export class TauriIpcTransport implements OpenScaleTransport {
 
   importFromScale(scaleId: string): Promise<number> {
     return invoke<number>("import_from_scale", { scaleId });
+  }
+
+  previewImportFromScale(scaleId: string, selection: ImportSelection): Promise<ScaleImportPreview> {
+    return invoke<ScaleImportPreview>("preview_import_from_scale", { scaleId, selection });
+  }
+
+  applyScaleImport(request: ScaleImportApplyRequest): Promise<ScaleImportResult> {
+    return invoke<ScaleImportResult>("apply_scale_import", { request });
   }
 
   syncScale(scaleId: string, mode: SyncMode): Promise<SyncReport> {

@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
-use openscale_domain::{BarcodeFormat, Department, StoredText, SyncMetadata, Tare, TaxRate};
+use openscale_domain::{
+    BarcodeFormat, Department, LabelFormat, StoredText, SyncMetadata, Tare, TaxRate,
+};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
@@ -244,6 +246,65 @@ impl MasterTablesRepository {
                     bid: row.try_get::<i64, _>("bid")? as u16,
                     name: row.try_get("name")?,
                     definition_json: row.try_get("definition_json")?,
+                    meta: parse_meta(&row)?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn upsert_label_format(&self, fmt: &LabelFormat) -> Result<(), StorageError> {
+        sqlx::query(
+            r#"
+            INSERT INTO label_formats (id, store_id, pfid, name, width_tenths_mm, height_tenths_mm, definition_json, raw_binary, sync_version, updated_at, deleted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(store_id, pfid) DO UPDATE SET
+                name = excluded.name,
+                width_tenths_mm = excluded.width_tenths_mm,
+                height_tenths_mm = excluded.height_tenths_mm,
+                definition_json = excluded.definition_json,
+                raw_binary = excluded.raw_binary,
+                sync_version = label_formats.sync_version + 1,
+                updated_at = excluded.updated_at,
+                deleted_at = excluded.deleted_at
+            "#,
+        )
+        .bind(fmt.id.to_string())
+        .bind(fmt.meta.store_id.to_string())
+        .bind(i64::from(fmt.pfid))
+        .bind(&fmt.name)
+        .bind(i64::from(fmt.width_tenths_mm))
+        .bind(i64::from(fmt.height_tenths_mm))
+        .bind(&fmt.definition_json)
+        .bind(fmt.raw_binary.as_deref())
+        .bind(fmt.meta.sync_version)
+        .bind(fmt.meta.updated_at.to_rfc3339())
+        .bind(fmt.meta.deleted_at.map(|d| d.to_rfc3339()))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_label_formats(
+        &self,
+        store_id: Uuid,
+    ) -> Result<Vec<LabelFormat>, StorageError> {
+        let rows = sqlx::query(
+            "SELECT id, store_id, pfid, name, width_tenths_mm, height_tenths_mm, definition_json, raw_binary, sync_version, updated_at, deleted_at FROM label_formats WHERE store_id = ? AND deleted_at IS NULL ORDER BY pfid ASC",
+        )
+        .bind(store_id.to_string())
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(LabelFormat {
+                    id: Uuid::parse_str(&row.try_get::<String, _>("id")?)?,
+                    pfid: row.try_get::<i64, _>("pfid")? as u16,
+                    name: row.try_get("name")?,
+                    width_tenths_mm: row.try_get::<i64, _>("width_tenths_mm")? as u16,
+                    height_tenths_mm: row.try_get::<i64, _>("height_tenths_mm")? as u16,
+                    definition_json: row.try_get("definition_json")?,
+                    raw_binary: row.try_get("raw_binary")?,
                     meta: parse_meta(&row)?,
                 })
             })

@@ -2,6 +2,7 @@ import {
   type DiscoveredScale,
   type Plu,
   type Scale,
+  type ScaleImportResult,
   type SyncMode,
   applyBulkPriceAdjustment,
   exportPlusToXlsxBuffer,
@@ -50,6 +51,7 @@ import { LabelFormatsView } from "./components/LabelFormatsView.js";
 import { MasterTablesView } from "./components/MasterTablesView.js";
 import { PluFormDialog } from "./components/PluFormDialog.js";
 import { SalesReportsView } from "./components/SalesReportsView.js";
+import { ScaleImportDialog } from "./components/ScaleImportDialog.js";
 import { ServiceConsoleView } from "./components/ServiceConsoleView.js";
 
 type Tab = "scales" | "catalog" | "masterTables" | "reports" | "service" | "labels" | "sync";
@@ -133,6 +135,8 @@ export function App() {
   );
   const [discovered, setDiscovered] = useState<DiscoveredScale[]>([]);
   const [syncHistory, setSyncHistory] = useState<SyncHistoryEntry[]>(() => loadSyncHistory());
+  const [importDialogScale, setImportDialogScale] = useState<Scale | null>(null);
+  const [importDialogFromSave, setImportDialogFromSave] = useState(false);
 
   // Catalog state
   const [search, setSearch] = useState("");
@@ -254,30 +258,34 @@ export function App() {
     },
   });
 
-  const importFromScaleMutation = useMutation({
-    mutationFn: (scaleId: string) => transport.importFromScale(scaleId),
-    onSuccess: async (count, scaleId) => {
-      await queryClient.invalidateQueries({ queryKey: ["plus"] });
-      const message = t("notifications.importedFromScale", { count });
-      toast({ variant: "success", message });
-      appendHistory({
-        operation: "import",
-        target: getScaleLabel(scaleId),
-        status: "success",
-        details: message,
-      });
-    },
-    onError: (err, scaleId) => {
-      const message = t("notifications.error", { message: String(err) });
-      toast({ variant: "error", message });
-      appendHistory({
-        operation: "import",
-        target: getScaleLabel(scaleId),
-        status: "error",
-        details: String(err),
-      });
-    },
-  });
+  const handleScaleImportCompleted = async (result: ScaleImportResult, scale: Scale) => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["plus"] }),
+      queryClient.invalidateQueries({ queryKey: ["departments"] }),
+      queryClient.invalidateQueries({ queryKey: ["tares"] }),
+      queryClient.invalidateQueries({ queryKey: ["tax_rates"] }),
+      queryClient.invalidateQueries({ queryKey: ["stored_texts"] }),
+      queryClient.invalidateQueries({ queryKey: ["barcode_formats"] }),
+      queryClient.invalidateQueries({ queryKey: ["label_formats"] }),
+    ]);
+
+    const message =
+      result.total_imported === 0 && result.kept_local_conflicts === 0
+        ? t("notifications.scaleImportEmpty", { unchanged: result.skipped_unchanged })
+        : t("notifications.scaleImportSummary", {
+            imported: result.total_imported,
+            keptLocal: result.kept_local_conflicts,
+            unchanged: result.skipped_unchanged,
+          });
+
+    toast({ variant: "success", message });
+    appendHistory({
+      operation: "import",
+      target: `${scale.name} (${scale.ip_address})`,
+      status: "success",
+      details: message,
+    });
+  };
 
   const syncScaleMutation = useMutation({
     mutationFn: ({ scaleId, mode }: { scaleId: string; mode: SyncMode }) =>
@@ -349,12 +357,14 @@ export function App() {
           deleted_at: null,
         },
       };
-      await transport.upsertScale(scale);
+      const saved = await transport.upsertScale(scale);
       await queryClient.invalidateQueries({ queryKey: ["scales"] });
       toast({
         variant: "success",
-        message: t("notifications.scaleSaved", { name: scale.name, ip: scale.ip_address }),
+        message: t("notifications.scaleSaved", { name: saved.name, ip: saved.ip_address }),
       });
+      setImportDialogFromSave(true);
+      setImportDialogScale(saved);
     } catch (err) {
       toast({
         variant: "error",
@@ -637,8 +647,6 @@ export function App() {
       enableSorting: false,
       cell: ({ row }) => {
         const scaleId = row.original.id;
-        const isImportingThis =
-          importFromScaleMutation.isPending && importFromScaleMutation.variables === scaleId;
         const isDeltaSyncingThis =
           syncScaleMutation.isPending &&
           syncScaleMutation.variables?.scaleId === scaleId &&
@@ -653,13 +661,13 @@ export function App() {
             <Button
               size="sm"
               variant="outline"
-              disabled={importFromScaleMutation.isPending}
-              onClick={() => importFromScaleMutation.mutate(scaleId)}
+              onClick={() => {
+                setImportDialogFromSave(false);
+                setImportDialogScale(row.original);
+              }}
             >
-              <Download
-                className={isImportingThis ? "h-3.5 w-3.5 animate-bounce" : "h-3.5 w-3.5"}
-              />
-              {isImportingThis ? t("scales.importing") : t("scales.importCatalog")}
+              <Download className="h-3.5 w-3.5" />
+              {t("scales.importCatalog")}
             </Button>
             <Button
               size="sm"
@@ -1342,6 +1350,13 @@ export function App() {
         cancelLabel={t("common.cancel")}
         closeLabel={t("common.close")}
         isPending={isDeletingPlu}
+      />
+      <ScaleImportDialog
+        open={importDialogScale !== null}
+        scale={importDialogScale}
+        fromSave={importDialogFromSave}
+        onClose={() => setImportDialogScale(null)}
+        onCompleted={(result, scale) => void handleScaleImportCompleted(result, scale)}
       />
     </div>
   );
