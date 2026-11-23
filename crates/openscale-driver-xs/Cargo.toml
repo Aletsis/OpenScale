@@ -9,6 +9,7 @@ description = "Avery Berkel XS / M-Series protocol driver (TCP 3001, UDP 23452) 
 [dependencies]
 async-trait.workspace = true
 bytes.workspace = true
+chrono.workspace = true
 encoding_rs.workspace = true
 openscale-domain = { path = "../openscale-domain" }
 openscale-driver = { path = "../openscale-driver" }

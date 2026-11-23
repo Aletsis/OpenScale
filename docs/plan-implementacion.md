@@ -192,10 +192,10 @@ Cada driver declara sus capacidades para evitar condicionales por modelo en la U
 - [x] **Ventas y Reportes:** lectura de `GRAND_TOTALS`, `DEPT_TOTALS`, `GROUP_TOTALS`, `OPERATOR_TOTALS`, `MACH_TOTALS` y `PLU_TOTALS` (períodos 0 y 1), historial de *snapshots* en SQLite, gráficas y exportación CSV/Excel/PDF.
 
 #### Hito `v0.3` — Consola de Servicio Técnico + Respaldo de Etiquetas
-- [ ] **`XsServicePort` (`28822`):** peso en vivo, balance/tara remota, editor legible de `#748 Scale Settings`, lectura de memoria/pools, logs de diagnóstico (`SYSTEM`/`COMMS`/`KEYBOARD`), impresión de prueba, cajón y reinicio remoto.
-- [ ] **Espejo LCD + Teclado Remoto:** render en vivo del bitmap `320×128` (1 bpp) y envío de `WRITE_KEYSTROKE`.
-- [ ] **`MACHINE_PARAMETERS` (`CMD=24`):** editor seguro (lectura previa de 80 B → edición → escritura completa).
-- [ ] **Gestión de `LABEL_FORMATS`:** lectura de `PFID 0..99`, listado de campos, respaldo JSON/binario y clonación entre básculas.
+- [x] **`XsServicePort` (`28822`):** peso en vivo, balance/tara remota, editor legible de `#748 Scale Settings`, lectura de memoria/pools, logs de diagnóstico (`SYSTEM`/`COMMS`/`KEYBOARD`), impresión de prueba, cajón y reinicio remoto.
+- [x] **Espejo LCD + Teclado Remoto:** render en vivo del bitmap `320×128` (1 bpp) y envío de `WRITE_KEYSTROKE`.
+- [x] **`MACHINE_PARAMETERS` (`CMD=24`):** editor seguro (lectura previa de 80 B → edición → escritura completa).
+- [x] **Gestión de `LABEL_FORMATS`:** lectura de `PFID 0..99`, listado de campos, respaldo JSON/binario y clonación entre básculas.
 
 #### Hito `v1.0` — Diseñador Visual de Etiquetas (WYSIWYG)
 - [ ] **Editor Canvas drag-and-drop:** regla en mm (conversión a décimas de mm `X1,Y1,X2,Y2` y `FW` en centésimas de mm), 50 slots de campo (`FT`), rotación `0°/90°/180°/270°` y vista previa de fuentes ABML.

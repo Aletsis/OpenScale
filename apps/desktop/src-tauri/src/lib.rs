@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use openscale_app::{OpenScaleApp, SyncMode, SyncReport};
@@ -5,13 +7,57 @@ use openscale_domain::{
     BarcodeFormat, Department, Plu, PluKey, SalesSnapshot, Scale, ScaleSalesReport, StoredText,
     Tare, TaxRate,
 };
-use openscale_driver::DiscoveredScale;
-use openscale_storage::{Database, StorageConfig};
+use openscale_driver::{DiscoveredScale, LcdFrame, ScaleDriver};
+use openscale_driver_xs::{
+    LabelFormatRecord, MachineParameters, ScaleSettings748, ServiceWeightReading, XS_SERVICE_PORT,
+    XsDriver, XsDriverConfig, XsServiceClient,
+};
+use openscale_storage::{DEFAULT_LOCAL_STORE_ID, Database, StorageConfig};
 use tauri::{Emitter, Manager, State};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 struct DesktopState {
     app: OpenScaleApp,
+    service_sessions: Arc<Mutex<HashMap<String, XsServiceClient>>>,
+}
+
+macro_rules! run_service_op {
+    ($state:expr, $host:expr, $port:expr, |$client:ident| $op:expr) => {{
+        let host_trimmed = $host.trim().to_string();
+        let key = format!("{}:{}", host_trimmed, $port.unwrap_or(XS_SERVICE_PORT));
+        let mut sessions = $state.service_sessions.lock().await;
+        let mut result: Result<_, String> = Err("XsServicePort session failed".to_string());
+
+        for attempt in 0..2 {
+            if !sessions.contains_key(&key) {
+                match XsServiceClient::connect(&host_trimmed, $port, Duration::from_secs(5)).await {
+                    Ok(client) => {
+                        sessions.insert(key.clone(), client);
+                    }
+                    Err(e) => {
+                        result = Err(e.to_string());
+                        break;
+                    }
+                }
+            }
+
+            let $client = sessions.get_mut(&key).expect("session just inserted");
+            match ($op).await {
+                Ok(val) => {
+                    result = Ok(val);
+                    break;
+                }
+                Err(err) => {
+                    sessions.remove(&key);
+                    if attempt == 1 {
+                        result = Err(err.to_string());
+                    }
+                }
+            }
+        }
+        result
+    }};
 }
 
 #[tauri::command]
@@ -209,6 +255,167 @@ async fn list_sales_snapshots(
         .map_err(|e| e.to_string())
 }
 
+// --- Hito v0.3: XsServicePort (28822), MACHINE_PARAMETERS & LABEL_FORMATS ---
+
+#[tauri::command]
+async fn xs_service_read_weight(
+    state: State<'_, DesktopState>,
+    host: String,
+    port: Option<u16>,
+) -> Result<ServiceWeightReading, String> {
+    run_service_op!(state, host, port, |c| c.read_weight())
+}
+
+#[tauri::command]
+async fn xs_service_balance(
+    state: State<'_, DesktopState>,
+    host: String,
+    port: Option<u16>,
+) -> Result<String, String> {
+    run_service_op!(state, host, port, |c| c.balance_scale())
+}
+
+#[tauri::command]
+async fn xs_service_read_settings(
+    state: State<'_, DesktopState>,
+    host: String,
+    port: Option<u16>,
+) -> Result<ScaleSettings748, String> {
+    run_service_op!(state, host, port, |c| c.read_scale_settings())
+}
+
+#[tauri::command]
+async fn xs_service_write_settings(
+    state: State<'_, DesktopState>,
+    host: String,
+    port: Option<u16>,
+    settings: ScaleSettings748,
+) -> Result<String, String> {
+    run_service_op!(state, host, port, |c| c.write_scale_settings(&settings))
+}
+
+#[tauri::command]
+async fn xs_service_read_lcd(
+    state: State<'_, DesktopState>,
+    host: String,
+    port: Option<u16>,
+) -> Result<LcdFrame, String> {
+    run_service_op!(state, host, port, |c| c.read_display_bitmap())
+}
+
+#[tauri::command]
+async fn xs_service_send_key(
+    state: State<'_, DesktopState>,
+    host: String,
+    port: Option<u16>,
+    scan_code: u8,
+    key_state: u8,
+) -> Result<String, String> {
+    run_service_op!(state, host, port, |c| c.write_keystroke(scan_code, key_state))
+}
+
+#[tauri::command]
+async fn xs_service_read_diag_log(
+    state: State<'_, DesktopState>,
+    host: String,
+    port: Option<u16>,
+    log_type: String,
+) -> Result<Vec<String>, String> {
+    run_service_op!(state, host, port, |c| c.read_diagnostic_log(&log_type, false))
+}
+
+#[tauri::command]
+async fn xs_service_action(
+    state: State<'_, DesktopState>,
+    host: String,
+    port: Option<u16>,
+    action: String,
+) -> Result<String, String> {
+    match action.as_str() {
+        "print_test" => run_service_op!(state, host, port, |c| c.print_test_report()),
+        "cash_drawer" => run_service_op!(state, host, port, |c| c.activate_cash_drawer()),
+        "reboot" => run_service_op!(state, host, port, |c| c.reboot()),
+        "memory_plu" => run_service_op!(state, host, port, |c| c.read_memory_details("PLU")),
+        other => Err(format!("unknown service action: {other}")),
+    }
+}
+
+#[tauri::command]
+async fn xs_read_machine_params(host: String, port: Option<u16>) -> Result<MachineParameters, String> {
+    let mut cfg = XsDriverConfig::new(host, DEFAULT_LOCAL_STORE_ID);
+    if let Some(p) = port {
+        cfg.port = p;
+    }
+    let mut driver = XsDriver::new(cfg);
+    driver.connect().await.map_err(|e| e.to_string())?;
+    let res = driver
+        .read_machine_parameters()
+        .await
+        .map_err(|e| e.to_string());
+    let _ = driver.disconnect().await;
+    res
+}
+
+#[tauri::command]
+async fn xs_write_machine_params(
+    host: String,
+    port: Option<u16>,
+    params: MachineParameters,
+) -> Result<(), String> {
+    let mut cfg = XsDriverConfig::new(host, DEFAULT_LOCAL_STORE_ID);
+    if let Some(p) = port {
+        cfg.port = p;
+    }
+    let mut driver = XsDriver::new(cfg);
+    driver.connect().await.map_err(|e| e.to_string())?;
+    let res = driver
+        .write_machine_parameters(&params)
+        .await
+        .map_err(|e| e.to_string());
+    let _ = driver.disconnect().await;
+    res
+}
+
+#[tauri::command]
+async fn xs_read_label_format(
+    host: String,
+    port: Option<u16>,
+    pfid: u8,
+) -> Result<LabelFormatRecord, String> {
+    let mut cfg = XsDriverConfig::new(host, DEFAULT_LOCAL_STORE_ID);
+    if let Some(p) = port {
+        cfg.port = p;
+    }
+    let mut driver = XsDriver::new(cfg);
+    driver.connect().await.map_err(|e| e.to_string())?;
+    let res = driver
+        .read_label_format(pfid)
+        .await
+        .map_err(|e| e.to_string());
+    let _ = driver.disconnect().await;
+    res
+}
+
+#[tauri::command]
+async fn xs_write_label_format(
+    host: String,
+    port: Option<u16>,
+    record: LabelFormatRecord,
+) -> Result<(), String> {
+    let mut cfg = XsDriverConfig::new(host, DEFAULT_LOCAL_STORE_ID);
+    if let Some(p) = port {
+        cfg.port = p;
+    }
+    let mut driver = XsDriver::new(cfg);
+    driver.connect().await.map_err(|e| e.to_string())?;
+    let res = driver
+        .write_label_format(&record)
+        .await
+        .map_err(|e| e.to_string());
+    let _ = driver.disconnect().await;
+    res
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -240,7 +447,10 @@ pub fn run() {
                 }
             });
 
-            app.manage(DesktopState { app: core });
+            app.manage(DesktopState {
+                app: core,
+                service_sessions: Arc::new(Mutex::new(HashMap::new())),
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -266,6 +476,18 @@ pub fn run() {
             sync_master_tables,
             capture_sales_snapshot,
             list_sales_snapshots,
+            xs_service_read_weight,
+            xs_service_balance,
+            xs_service_read_settings,
+            xs_service_write_settings,
+            xs_service_read_lcd,
+            xs_service_send_key,
+            xs_service_read_diag_log,
+            xs_service_action,
+            xs_read_machine_params,
+            xs_write_machine_params,
+            xs_read_label_format,
+            xs_write_label_format,
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenScale desktop application");

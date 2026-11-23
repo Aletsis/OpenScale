@@ -16,6 +16,8 @@ use crate::codec::{
     decode_version_details, encode_change_price, encode_datetime, encode_plu_search_header,
     encode_plu_write,
 };
+use crate::label_formats::LabelFormatRecord;
+use crate::machine_params::MachineParameters;
 use crate::master_tables::{
     decode_barcode_format_read, decode_department_read, decode_media_asset_read,
     decode_stored_text_read, decode_tare_read, decode_tax_read, encode_barcode_format_write,
@@ -25,13 +27,14 @@ use crate::master_tables::{
 use crate::protocol::{
     ACTION_CLEAR, ACTION_REQUEST, ACTION_UPDATE, AbCmdHeader, CMD_ASSETINFO, CMD_BARCODE_FORMATS,
     CMD_CHANGE_PRICE, CMD_DATE_AND_TIME, CMD_DEPT_NAMES, CMD_DEPT_TOTALS, CMD_GRAND_TOTALS,
-    CMD_GROUP_TOTALS, CMD_MACH_TOTALS, CMD_MACHNETCONFIG, CMD_MEDIA, CMD_OPERATOR_TOTALS,
-    CMD_PLU_RECORD, CMD_PLU_TOTALS, CMD_STORED_TARE, CMD_STORED_TEXT, CMD_TAX_RATES,
-    CMD_VERSION_DETAILS, CVN_ASSETINFO, CVN_BARCODE_FORMATS, CVN_CHANGE_PRICE, CVN_DATE_AND_TIME,
-    CVN_DEPT_NAMES, CVN_MACHNETCONFIG, CVN_MEDIA, CVN_PLU_RECORD, CVN_PLU_TOTALS, CVN_STORED_TARE,
-    CVN_STORED_TEXT, CVN_TAX_RATES, CVN_TOTALS_BASIC, CVN_VERSION_DETAILS, HEADER_LEN,
-    MAX_DATA_BLOCK_SIZE, STATUS_NO_TOTALS_FOUND, STATUS_PLU_LAST_PLU, STATUS_PLU_NOT_FOUND,
-    STATUS_SUCCESS, XS_DATA_PORT,
+    CMD_GROUP_TOTALS, CMD_LABEL_FORMATS, CMD_MACH_TOTALS, CMD_MACHINE_PARAMETERS,
+    CMD_MACHNETCONFIG, CMD_MEDIA, CMD_OPERATOR_TOTALS, CMD_PLU_RECORD, CMD_PLU_TOTALS,
+    CMD_STORED_TARE, CMD_STORED_TEXT, CMD_TAX_RATES, CMD_VERSION_DETAILS, CVN_ASSETINFO,
+    CVN_BARCODE_FORMATS, CVN_CHANGE_PRICE, CVN_DATE_AND_TIME, CVN_DEPT_NAMES, CVN_LABEL_FORMATS,
+    CVN_MACHINE_PARAMETERS, CVN_MACHNETCONFIG, CVN_MEDIA, CVN_PLU_RECORD, CVN_PLU_TOTALS,
+    CVN_STORED_TARE, CVN_STORED_TEXT, CVN_TAX_RATES, CVN_TOTALS_BASIC, CVN_VERSION_DETAILS,
+    HEADER_LEN, MAX_DATA_BLOCK_SIZE, STATUS_NO_TOTALS_FOUND, STATUS_PLU_LAST_PLU,
+    STATUS_PLU_NOT_FOUND, STATUS_SUCCESS, XS_DATA_PORT,
 };
 use crate::sales::{
     decode_dept_totals, decode_grand_totals, decode_group_totals, decode_mach_totals,
@@ -182,6 +185,91 @@ impl XsDriver {
         }
 
         Ok((last_status, assembled))
+    }
+
+    pub async fn read_machine_parameters(&mut self) -> Result<MachineParameters, DriverError> {
+        let (status, payload) = self
+            .send_command(
+                CMD_MACHINE_PARAMETERS,
+                ACTION_REQUEST,
+                CVN_MACHINE_PARAMETERS,
+                &[],
+            )
+            .await?;
+        if status != STATUS_SUCCESS {
+            return Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("MACHINE_PARAMETERS read failed with status {status}"),
+            });
+        }
+        MachineParameters::decode(&payload)
+    }
+
+    pub async fn write_machine_parameters(
+        &mut self,
+        params: &MachineParameters,
+    ) -> Result<(), DriverError> {
+        let payload = params.encode()?;
+        let (status, _) = self
+            .send_command(
+                CMD_MACHINE_PARAMETERS,
+                ACTION_UPDATE,
+                CVN_MACHINE_PARAMETERS,
+                &payload,
+            )
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("MACHINE_PARAMETERS write failed with status {status}"),
+            })
+        }
+    }
+
+    pub async fn read_label_format(&mut self, pfid: u8) -> Result<LabelFormatRecord, DriverError> {
+        let (status, payload) = self
+            .send_command(
+                CMD_LABEL_FORMATS,
+                ACTION_REQUEST,
+                CVN_LABEL_FORMATS,
+                &[pfid, 0],
+            )
+            .await?;
+        if status != STATUS_SUCCESS {
+            return Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!("LABEL_FORMATS read PFID {pfid} failed with status {status}"),
+            });
+        }
+        LabelFormatRecord::decode(&payload)
+    }
+
+    pub async fn write_label_format(
+        &mut self,
+        record: &LabelFormatRecord,
+    ) -> Result<(), DriverError> {
+        let payload = record.encode();
+        let (status, _) = self
+            .send_command(
+                CMD_LABEL_FORMATS,
+                ACTION_UPDATE,
+                CVN_LABEL_FORMATS,
+                &payload,
+            )
+            .await?;
+        if status == STATUS_SUCCESS {
+            Ok(())
+        } else {
+            Err(DriverError::Protocol {
+                code: Some(i32::from(status)),
+                message: format!(
+                    "LABEL_FORMATS write PFID {} failed with status {status}",
+                    record.pfid
+                ),
+            })
+        }
     }
 
     async fn read_plu_with_flags(

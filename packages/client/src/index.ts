@@ -2,3 +2,4 @@ export * from "./types.js";
 export * from "./transport.js";
 export * from "./catalog-io.js";
 export * from "./sales-export.js";
+export * from "./lcd-renderer.js";

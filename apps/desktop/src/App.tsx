@@ -25,6 +25,7 @@ import {
   Check,
   Database,
   Download,
+  FileCode2,
   Globe,
   History,
   Layers,
@@ -39,16 +40,19 @@ import {
   Sun,
   Trash2,
   Upload,
+  Wrench,
   X,
 } from "lucide-react";
 import { type FormEvent, useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { LabelFormatsView } from "./components/LabelFormatsView.js";
 import { MasterTablesView } from "./components/MasterTablesView.js";
 import { PluFormDialog } from "./components/PluFormDialog.js";
 import { SalesReportsView } from "./components/SalesReportsView.js";
+import { ServiceConsoleView } from "./components/ServiceConsoleView.js";
 
-type Tab = "scales" | "catalog" | "masterTables" | "reports" | "sync";
+type Tab = "scales" | "catalog" | "masterTables" | "reports" | "service" | "labels" | "sync";
 
 interface SyncHistoryEntry {
   id: string;
@@ -944,6 +948,22 @@ export function App() {
             <BarChart3 className="h-4 w-4" />
             {t("nav.reports")}
           </Button>
+          <Button
+            variant={activeTab === "service" ? "default" : "ghost"}
+            className="justify-start"
+            onClick={() => setActiveTab("service")}
+          >
+            <Wrench className="h-4 w-4" />
+            {t("nav.service")}
+          </Button>
+          <Button
+            variant={activeTab === "labels" ? "default" : "ghost"}
+            className="justify-start"
+            onClick={() => setActiveTab("labels")}
+          >
+            <FileCode2 className="h-4 w-4" />
+            Label Formats
+          </Button>
         </nav>
 
         <div className="mt-auto flex items-center gap-2 border-t border-border pt-4">
@@ -985,6 +1005,26 @@ export function App() {
             <>
               <h2 className="text-xl font-semibold tracking-tight">{t("nav.reports")}</h2>
               <SalesReportsView
+                scales={scales}
+                onStatus={(message) => toast({ variant: "info", message })}
+              />
+            </>
+          )}
+
+          {activeTab === "service" && (
+            <>
+              <h2 className="text-xl font-semibold tracking-tight">{t("nav.service")}</h2>
+              <ServiceConsoleView
+                scales={scales}
+                onStatus={(message) => toast({ variant: "info", message })}
+              />
+            </>
+          )}
+
+          {activeTab === "labels" && (
+            <>
+              <h2 className="text-xl font-semibold tracking-tight">Label Formats (PFID 0..99)</h2>
+              <LabelFormatsView
                 scales={scales}
                 onStatus={(message) => toast({ variant: "info", message })}
               />
