@@ -1,0 +1,28 @@
+[package]
+name = "openscale-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Application services (ScaleManager actor pool, SyncEngine delta sync, Discovery, Catalog) decoupled from Tauri and Axum."
+
+[dependencies]
+chrono.workspace = true
+openscale-domain = { path = "../openscale-domain" }
+openscale-driver = { path = "../openscale-driver" }
+openscale-driver-xs = { path = "../openscale-driver-xs" }
+openscale-driver-xti = { path = "../openscale-driver-xti" }
+openscale-storage = { path = "../openscale-storage" }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+
+[lints]
+workspace = true
