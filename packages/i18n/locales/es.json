@@ -16,10 +16,27 @@
     "discover": "Descubrir Básculas",
     "discovering": "Escaneando red...",
     "registered": "Básculas Registradas",
-    "lanDiscovery": "Descubrimiento LAN",
+    "lanDiscovery": "Nuevas Básculas en LAN",
     "importCatalog": "Importar PLUs",
+    "importing": "Importando...",
     "deltaSync": "Delta Sync",
     "fullSync": "Full Sync",
+    "syncing": "Sincronizando...",
+    "emptyHint": "Ejecuta Descubrir Básculas para buscar equipos Avery Berkel en tu red local.",
+    "stats": {
+      "registered": "Registradas",
+      "online": "En línea",
+      "discovered": "Nuevas en LAN"
+    },
+    "columns": {
+      "protocol": "Protocolo",
+      "name": "Nombre",
+      "ip": "Dirección IP",
+      "port": "Puerto",
+      "model": "Modelo",
+      "firmware": "Firmware",
+      "status": "Estado"
+    },
     "status": {
       "online": "En línea",
       "offline": "Sin conexión",
@@ -32,11 +49,46 @@
     "title": "Catálogo Maestro de PLUs",
     "addPlu": "Nuevo PLU",
     "editPlu": "Editar PLU",
+    "createDescription": "Registra un nuevo producto en tu catálogo local de PLUs.",
+    "editDescription": "Editando PLU {{did}}:{{plu}}. Recuerda sincronizar las básculas al guardar.",
     "bulkPrice": "Precio Masivo",
+    "bulkDescription": "Ajustar precios en {{count}} PLU(s) visibles.",
+    "bulkModePercent": "% Porcentaje",
+    "bulkModeFixed": "$ Monto fijo (+/-)",
+    "bulkValueLabel": "Ajuste",
     "importFile": "Importar CSV/Excel",
     "exportCsv": "Exportar CSV",
     "exportXlsx": "Exportar Excel",
     "searchPlaceholder": "Buscar por PLU, descripción o EAN...",
+    "pluCount": "{{count}} PLUs",
+    "filteredCount": "{{shown}} de {{total}} PLUs",
+    "emptyHint": "Agrega tu primer PLU manualmente, importa un archivo CSV/Excel o lee el catálogo de una báscula.",
+    "emptySearchHint": "Prueba ajustando o limpiando el filtro de búsqueda.",
+    "clickToEditPrice": "Clic para editar precio",
+    "deleteConfirmTitle": "¿Eliminar PLU {{did}}:{{plu}}?",
+    "deleteConfirmDescription": "Se eliminará \"{{description}}\" del catálogo local. Recuerda sincronizar tus básculas para aplicar el cambio.",
+    "form": {
+      "sectionIdentity": "Identificación",
+      "sectionPricing": "Precios y tipo de venta",
+      "sectionLabeling": "Pesaje y etiquetado",
+      "buttonText": "Texto en botón",
+      "buttonTextPlaceholder": "Etiqueta corta en teclado de báscula",
+      "sku": "SKU / Código interno",
+      "price1": "Precio 1",
+      "price2": "Precio 2 (Oferta)",
+      "tareGrams": "Tara (g)",
+      "shelfLifeDays": "Caducidad (días)",
+      "labelFormatId": "Formato etiqueta ID",
+      "barcodeFormatId": "Formato código barras ID",
+      "duplicateWarning": "El PLU {{did}}:{{plu}} ya existe ({{description}}). Al guardar se sobrescribirá.",
+      "byWeight": "Por peso",
+      "byCount": "Por pieza / unidad",
+      "fixedWeight": "Peso fijo",
+      "fixedPrice": "Precio fijo",
+      "byVolume": "Por volumen",
+      "manualWeight": "Peso manual",
+      "negativeByCount": "Negativo por pieza"
+    },
     "columns": {
       "did": "Depto",
       "plu": "PLU",
@@ -47,6 +99,50 @@
       "actions": "Acciones"
     }
   },
+  "syncHistory": {
+    "title": "Sincronización y Actividad",
+    "subtitle": "Historial reciente de descubrimientos LAN, importaciones y envíos a básculas.",
+    "clear": "Limpiar historial",
+    "emptyHint": "Sincroniza o importa desde una báscula para ver el registro de actividad aquí.",
+    "columns": {
+      "time": "Hora",
+      "operation": "Operación",
+      "target": "Báscula / Destino",
+      "status": "Estado",
+      "details": "Resumen"
+    },
+    "ops": {
+      "delta": "Delta Sync",
+      "full": "Full Sync",
+      "import": "Importar PLUs",
+      "discover": "Descubrimiento LAN"
+    },
+    "status": {
+      "success": "Exitoso",
+      "warning": "Parcial",
+      "error": "Error"
+    }
+  },
+  "notifications": {
+    "lanFound": "Descubrimiento LAN: se encontraron {{count}} báscula(s) nueva(s).",
+    "lanFoundFiltered": "Descubrimiento LAN: {{newCount}} nueva(s) ({{existingCount}} ya registrada(s) omitida(s)).",
+    "lanAllRegistered": "Descubrimiento LAN: se encontraron {{count}} báscula(s), pero todas ya están registradas.",
+    "lanNone": "Escaneo finalizado: no se encontraron básculas en la red.",
+    "scaleSaved": "Báscula {{name}} ({{ip}}) guardada.",
+    "scaleUpdated": "Báscula {{name}} ({{ip}}) actualizada.",
+    "importedFromScale": "Se importaron {{count}} PLU(s) desde la báscula al catálogo local.",
+    "syncComplete": "Sincronización ({{mode}}): {{sent}} enviados, {{skipped}} sin cambios, {{failed}} fallidos.",
+    "pluSaved": "PLU {{did}}:{{plu}} guardado.",
+    "pluPriceUpdated": "Precio actualizado para PLU {{did}}:{{plu}} (${{price}}).",
+    "pluDeleted": "PLU {{did}}:{{plu}} eliminado.",
+    "bulkUpdated": "Precios actualizados en {{count}} PLU(s).",
+    "importedFromFile": "Se importaron {{count}} PLU(s) desde {{filename}}.",
+    "exportedCsv": "Se exportaron {{count}} PLU(s) a CSV.",
+    "exportedXlsx": "Se exportaron {{count}} PLU(s) a Excel.",
+    "invalidDidPlu": "Ingresa un departamento válido (≥ 0) y un número de PLU (> 0).",
+    "invalidPrice": "Ingresa un precio válido mayor o igual a 0.",
+    "error": "Error: {{message}}"
+  },
   "common": {
     "save": "Guardar",
     "cancel": "Cancelar",
@@ -55,6 +151,10 @@
     "apply": "Aplicar",
     "refresh": "Actualizar",
     "language": "Idioma",
+    "close": "Cerrar",
+    "clearSearch": "Limpiar búsqueda",
+    "lightMode": "Modo claro",
+    "darkMode": "Modo oscuro",
     "noData": "No se encontraron registros"
   }
 }

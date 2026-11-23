@@ -16,10 +16,27 @@
     "discover": "Discover Scales",
     "discovering": "Scanning network...",
     "registered": "Registered Scales",
-    "lanDiscovery": "LAN Discovery",
+    "lanDiscovery": "New Scales on LAN",
     "importCatalog": "Import PLUs",
+    "importing": "Importing...",
     "deltaSync": "Delta Sync",
     "fullSync": "Full Sync",
+    "syncing": "Syncing...",
+    "emptyHint": "Run LAN Discovery to find Avery Berkel scales on your local network.",
+    "stats": {
+      "registered": "Registered",
+      "online": "Online",
+      "discovered": "New on LAN"
+    },
+    "columns": {
+      "protocol": "Protocol",
+      "name": "Name",
+      "ip": "IP Address",
+      "port": "Port",
+      "model": "Model",
+      "firmware": "Firmware",
+      "status": "Status"
+    },
     "status": {
       "online": "Online",
       "offline": "Offline",
@@ -32,11 +49,46 @@
     "title": "Master PLU Catalog",
     "addPlu": "New PLU",
     "editPlu": "Edit PLU",
+    "createDescription": "Register a new product in your local SQLite PLU catalog.",
+    "editDescription": "Editing PLU {{did}}:{{plu}}. Remember to sync scales after saving.",
     "bulkPrice": "Bulk Price",
+    "bulkDescription": "Adjust prices across {{count}} visible PLU(s).",
+    "bulkModePercent": "% Percentage",
+    "bulkModeFixed": "$ Fixed amount (+/-)",
+    "bulkValueLabel": "Adjustment",
     "importFile": "Import CSV/Excel",
     "exportCsv": "Export CSV",
     "exportXlsx": "Export Excel",
     "searchPlaceholder": "Search by PLU, description, or EAN...",
+    "pluCount": "{{count}} PLUs",
+    "filteredCount": "{{shown}} of {{total}} PLUs",
+    "emptyHint": "Add your first PLU manually, import a CSV/Excel file, or pull from a connected scale.",
+    "emptySearchHint": "Try adjusting or clearing your search filter.",
+    "clickToEditPrice": "Click to edit price",
+    "deleteConfirmTitle": "Delete PLU {{did}}:{{plu}}?",
+    "deleteConfirmDescription": "This will remove \"{{description}}\" from your local catalog. You will need to sync your scales to apply the change.",
+    "form": {
+      "sectionIdentity": "Identification",
+      "sectionPricing": "Pricing & Sale Type",
+      "sectionLabeling": "Weighing & Labeling",
+      "buttonText": "Button text",
+      "buttonTextPlaceholder": "Short label on scale keypad",
+      "sku": "SKU / Internal code",
+      "price1": "Price 1",
+      "price2": "Price 2 (Promo)",
+      "tareGrams": "Tare (g)",
+      "shelfLifeDays": "Shelf Life (days)",
+      "labelFormatId": "Label format ID",
+      "barcodeFormatId": "Barcode format ID",
+      "duplicateWarning": "PLU {{did}}:{{plu}} already exists ({{description}}). Saving will overwrite it.",
+      "byWeight": "By weight",
+      "byCount": "By count / unit",
+      "fixedWeight": "Fixed weight",
+      "fixedPrice": "Fixed price",
+      "byVolume": "By volume",
+      "manualWeight": "Manual weight",
+      "negativeByCount": "Negative by count"
+    },
     "columns": {
       "did": "Dept",
       "plu": "PLU",
@@ -47,6 +99,50 @@
       "actions": "Actions"
     }
   },
+  "syncHistory": {
+    "title": "Synchronization & Activity",
+    "subtitle": "Recent LAN discoveries, catalog imports, and scale sync operations.",
+    "clear": "Clear history",
+    "emptyHint": "Sync or import from a scale to record activity here.",
+    "columns": {
+      "time": "Time",
+      "operation": "Operation",
+      "target": "Scale / Target",
+      "status": "Status",
+      "details": "Summary"
+    },
+    "ops": {
+      "delta": "Delta Sync",
+      "full": "Full Sync",
+      "import": "Import PLUs",
+      "discover": "LAN Discovery"
+    },
+    "status": {
+      "success": "Success",
+      "warning": "Partial",
+      "error": "Error"
+    }
+  },
+  "notifications": {
+    "lanFound": "LAN Discovery: {{count}} new scale(s) found.",
+    "lanFoundFiltered": "LAN Discovery: {{newCount}} new scale(s) found ({{existingCount}} already registered omitted).",
+    "lanAllRegistered": "LAN Discovery: {{count}} scale(s) found, all already registered.",
+    "lanNone": "LAN Discovery finished: no scales found on the network.",
+    "scaleSaved": "Scale {{name}} ({{ip}}) saved.",
+    "scaleUpdated": "Scale {{name}} ({{ip}}) updated.",
+    "importedFromScale": "Imported {{count}} PLU(s) from scale into local catalog.",
+    "syncComplete": "Sync ({{mode}}): {{sent}} sent, {{skipped}} unchanged, {{failed}} failed.",
+    "pluSaved": "PLU {{did}}:{{plu}} saved.",
+    "pluPriceUpdated": "Price updated for PLU {{did}}:{{plu}} (${{price}}).",
+    "pluDeleted": "PLU {{did}}:{{plu}} deleted.",
+    "bulkUpdated": "Updated prices for {{count}} PLU(s).",
+    "importedFromFile": "Imported {{count}} PLU(s) from {{filename}}.",
+    "exportedCsv": "Exported {{count}} PLU(s) to CSV.",
+    "exportedXlsx": "Exported {{count}} PLU(s) to Excel.",
+    "invalidDidPlu": "Please enter a valid department (≥ 0) and PLU number (> 0).",
+    "invalidPrice": "Please enter a valid non-negative price.",
+    "error": "Error: {{message}}"
+  },
   "common": {
     "save": "Save",
     "cancel": "Cancel",
@@ -55,6 +151,10 @@
     "apply": "Apply",
     "refresh": "Refresh",
     "language": "Language",
+    "close": "Close",
+    "clearSearch": "Clear search",
+    "lightMode": "Light mode",
+    "darkMode": "Dark mode",
     "noData": "No records found"
   }
 }
