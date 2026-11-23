@@ -82,6 +82,17 @@ impl OpenScaleApp {
         Ok(scale)
     }
 
+    pub async fn delete_scale(&self, scale_id: Uuid) -> Result<bool, AppError> {
+        let deleted = self
+            .scale_repo()
+            .soft_delete(self.store_id, scale_id)
+            .await?;
+        if deleted {
+            self.scales.unregister(scale_id).await;
+        }
+        Ok(deleted)
+    }
+
     pub async fn list_plus(&self) -> Result<Vec<Plu>, AppError> {
         Ok(self.plu_repo().list_active(self.store_id).await?)
     }

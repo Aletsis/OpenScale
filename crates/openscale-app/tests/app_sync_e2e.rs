@@ -701,3 +701,36 @@ async fn selective_import_with_conflict_resolution_e2e() {
 
     app.scales.unregister(scale_id).await;
 }
+
+#[tokio::test]
+async fn delete_scale_soft_deletes_and_unregisters_actor() {
+    let db = Database::connect_in_memory().await.unwrap();
+    let app = OpenScaleApp::new(db);
+
+    let scale_id = new_id();
+    let scale = Scale {
+        id: scale_id,
+        group_id: None,
+        name: "Carnicería 02".to_string(),
+        family: ScaleFamily::AveryBerkelXs,
+        ip_address: "192.168.9.115".to_string(),
+        data_port: 3001,
+        service_port: Some(28822),
+        serial_number: Some("22320311".to_string()),
+        model: Some("XS200".to_string()),
+        firmware_version: Some("4.1.7.0".to_string()),
+        mac_address: None,
+        status: ScaleStatus::Online,
+        last_seen_at: None,
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    };
+
+    app.upsert_scale(scale).await.unwrap();
+    assert_eq!(app.list_scales().await.unwrap().len(), 1);
+    assert!(app.scales.get(scale_id).await.is_ok());
+
+    assert!(app.delete_scale(scale_id).await.unwrap());
+    assert!(!app.delete_scale(scale_id).await.unwrap());
+    assert!(app.list_scales().await.unwrap().is_empty());
+    assert!(app.scales.get(scale_id).await.is_err());
+}

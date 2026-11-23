@@ -47,6 +47,7 @@ const mockTransport: OpenScaleTransport = {
   discoverScales: async () => [],
   listScales: async () => [],
   upsertScale: async (s) => s,
+  deleteScale: async () => true,
   listPlus: async () => INITIAL_PLUS,
   getPlu: async () => INITIAL_PLUS[0] ?? null,
   upsertPlu: async (p) => p,

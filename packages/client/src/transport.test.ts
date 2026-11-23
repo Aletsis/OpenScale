@@ -93,6 +93,7 @@ describe("HttpWsTransport", () => {
       .fn()
       .mockResolvedValueOnce(mockJsonResponse([]))
       .mockResolvedValueOnce(mockJsonResponse(sampleScale))
+      .mockResolvedValueOnce(mockJsonResponse(null))
       .mockResolvedValueOnce(mockJsonResponse([samplePlu]))
       .mockResolvedValueOnce(mockJsonResponse(samplePlu))
       .mockResolvedValueOnce(mockJsonResponse(samplePlu))
@@ -115,12 +116,19 @@ describe("HttpWsTransport", () => {
       expect.objectContaining({ method: "PUT", body: JSON.stringify(sampleScale) }),
     );
 
+    expect(await transport.deleteScale("scale-1")).toBe(true);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://localhost:8080/api/v1/scales/scale-1",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+
     expect(await transport.listPlus()).toEqual([samplePlu]);
     expect(await transport.getPlu({ did: 1, plu: 100 })).toEqual(samplePlu);
     expect(await transport.upsertPlu(samplePlu)).toEqual(samplePlu);
     expect(await transport.deletePlu({ did: 1, plu: 100 })).toBe(true);
     expect(fetchMock).toHaveBeenNthCalledWith(
-      6,
+      7,
       "http://localhost:8080/api/v1/plus/1/100",
       expect.objectContaining({ method: "DELETE" }),
     );

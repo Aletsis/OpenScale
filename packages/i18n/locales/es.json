@@ -23,6 +23,8 @@
     "fullSync": "Full Sync",
     "syncing": "Sincronizando...",
     "emptyHint": "Ejecuta Descubrir Básculas para buscar equipos Avery Berkel en tu red local.",
+    "deleteConfirmTitle": "¿Eliminar báscula {{name}}?",
+    "deleteConfirmDescription": "Se eliminará \"{{name}}\" ({{ip}}) de las básculas registradas. Los PLUs de tu catálogo local no se verán afectados.",
     "stats": {
       "registered": "Registradas",
       "online": "En línea",
@@ -203,6 +205,7 @@
     "lanNone": "Escaneo finalizado: no se encontraron básculas en la red.",
     "scaleSaved": "Báscula {{name}} ({{ip}}) guardada.",
     "scaleUpdated": "Báscula {{name}} ({{ip}}) actualizada.",
+    "scaleDeleted": "Báscula {{name}} ({{ip}}) eliminada.",
     "importedFromScale": "Se importaron {{count}} PLU(s) desde la báscula al catálogo local.",
     "scaleImportSummary": "Importación completada: {{imported}} registro(s) guardado(s), {{keptLocal}} conflicto(s) conservado(s) localmente, {{unchanged}} sin cambios.",
     "scaleImportEmpty": "No se encontraron nuevos registros para importar ({{unchanged}} sin cambios).",

@@ -88,6 +88,25 @@ impl ScaleRepository {
 
         rows.into_iter().map(row_to_scale).collect()
     }
+
+    pub async fn soft_delete(&self, store_id: Uuid, scale_id: Uuid) -> Result<bool, StorageError> {
+        let now = Utc::now().to_rfc3339();
+        let res = sqlx::query(
+            r#"
+            UPDATE scales
+            SET deleted_at = ?, updated_at = ?, sync_version = sync_version + 1
+            WHERE store_id = ? AND id = ? AND deleted_at IS NULL
+            "#,
+        )
+        .bind(&now)
+        .bind(&now)
+        .bind(store_id.to_string())
+        .bind(scale_id.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(res.rows_affected() > 0)
+    }
 }
 
 fn family_to_str(family: ScaleFamily) -> &'static str {
@@ -206,5 +225,23 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].ip_address, "192.168.9.113");
         assert_eq!(list[0].family, ScaleFamily::AveryBerkelXs);
+
+        assert!(
+            repo.soft_delete(DEFAULT_LOCAL_STORE_ID, scale.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !repo
+                .soft_delete(DEFAULT_LOCAL_STORE_ID, scale.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            repo.list_active(DEFAULT_LOCAL_STORE_ID)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 }

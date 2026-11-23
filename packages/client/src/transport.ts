@@ -24,6 +24,7 @@ export interface OpenScaleTransport {
   discoverScales(): Promise<DiscoveredScale[]>;
   listScales(): Promise<Scale[]>;
   upsertScale(scale: Scale): Promise<Scale>;
+  deleteScale(scaleId: string): Promise<boolean>;
 
   // Master PLU Catalog
   listPlus(): Promise<Plu[]>;
@@ -94,6 +95,13 @@ export class HttpWsTransport implements OpenScaleTransport {
       method: "PUT",
       body: JSON.stringify(scale),
     });
+  }
+
+  async deleteScale(scaleId: string): Promise<boolean> {
+    await this.request<void>(`/api/v1/scales/${encodeURIComponent(scaleId)}`, {
+      method: "DELETE",
+    });
+    return true;
   }
 
   listPlus(): Promise<Plu[]> {

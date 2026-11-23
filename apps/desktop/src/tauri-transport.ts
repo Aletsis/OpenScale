@@ -32,6 +32,10 @@ export class TauriIpcTransport implements OpenScaleTransport {
     return invoke<Scale>("upsert_scale", { scale });
   }
 
+  deleteScale(scaleId: string): Promise<boolean> {
+    return invoke<boolean>("delete_scale", { scaleId });
+  }
+
   listPlus(): Promise<Plu[]> {
     return invoke<Plu[]>("list_plus");
   }

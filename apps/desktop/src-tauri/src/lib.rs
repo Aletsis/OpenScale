@@ -96,6 +96,15 @@ async fn upsert_scale(state: State<'_, DesktopState>, scale: Scale) -> Result<Sc
 }
 
 #[tauri::command]
+async fn delete_scale(state: State<'_, DesktopState>, scale_id: Uuid) -> Result<bool, String> {
+    state
+        .app
+        .delete_scale(scale_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn list_plus(state: State<'_, DesktopState>) -> Result<Vec<Plu>, String> {
     state.app.list_plus().await.map_err(|e| e.to_string())
 }
@@ -520,6 +529,7 @@ pub fn run() {
             discover_scales,
             list_scales,
             upsert_scale,
+            delete_scale,
             list_plus,
             get_plu,
             upsert_plu,

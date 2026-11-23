@@ -138,6 +138,8 @@ export function App() {
   const [syncHistory, setSyncHistory] = useState<SyncHistoryEntry[]>(() => loadSyncHistory());
   const [importDialogScale, setImportDialogScale] = useState<Scale | null>(null);
   const [importDialogFromSave, setImportDialogFromSave] = useState(false);
+  const [pendingDeleteScale, setPendingDeleteScale] = useState<Scale | null>(null);
+  const [isDeletingScale, setIsDeletingScale] = useState(false);
 
   // Catalog state
   const [search, setSearch] = useState("");
@@ -371,6 +373,32 @@ export function App() {
         variant: "error",
         message: t("notifications.error", { message: String(err) }),
       });
+    }
+  };
+
+  const handleConfirmDeleteScale = async () => {
+    if (!pendingDeleteScale) {
+      return;
+    }
+    setIsDeletingScale(true);
+    try {
+      await transport.deleteScale(pendingDeleteScale.id);
+      await queryClient.invalidateQueries({ queryKey: ["scales"] });
+      toast({
+        variant: "success",
+        message: t("notifications.scaleDeleted", {
+          name: pendingDeleteScale.name,
+          ip: pendingDeleteScale.ip_address,
+        }),
+      });
+      setPendingDeleteScale(null);
+    } catch (err) {
+      toast({
+        variant: "error",
+        message: t("notifications.error", { message: String(err) }),
+      });
+    } finally {
+      setIsDeletingScale(false);
     }
   };
 
@@ -690,6 +718,16 @@ export function App() {
                 className={isFullSyncingThis ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"}
               />
               {isFullSyncingThis ? t("scales.syncing") : t("scales.fullSync")}
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              disabled={syncScaleMutation.isPending}
+              onClick={() => setPendingDeleteScale(row.original)}
+              aria-label={t("common.delete")}
+              title={t("common.delete")}
+            >
+              <Trash2 className="h-3.5 w-3.5 text-destructive" />
             </Button>
           </div>
         );
@@ -1363,6 +1401,28 @@ export function App() {
         cancelLabel={t("common.cancel")}
         closeLabel={t("common.close")}
         isPending={isDeletingPlu}
+      />
+      <ConfirmDialog
+        open={pendingDeleteScale !== null}
+        onClose={() => setPendingDeleteScale(null)}
+        onConfirm={() => void handleConfirmDeleteScale()}
+        title={
+          pendingDeleteScale
+            ? t("scales.deleteConfirmTitle", { name: pendingDeleteScale.name })
+            : ""
+        }
+        description={
+          pendingDeleteScale
+            ? t("scales.deleteConfirmDescription", {
+                name: pendingDeleteScale.name,
+                ip: pendingDeleteScale.ip_address,
+              })
+            : ""
+        }
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        closeLabel={t("common.close")}
+        isPending={isDeletingScale}
       />
       <ScaleImportDialog
         open={importDialogScale !== null}

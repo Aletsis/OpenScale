@@ -23,6 +23,8 @@
     "fullSync": "Full Sync",
     "syncing": "Syncing...",
     "emptyHint": "Run LAN Discovery to find Avery Berkel scales on your local network.",
+    "deleteConfirmTitle": "Delete scale {{name}}?",
+    "deleteConfirmDescription": "This will remove \"{{name}}\" ({{ip}}) from your registered scales. PLUs in your local catalog will not be affected.",
     "stats": {
       "registered": "Registered",
       "online": "Online",
@@ -203,6 +205,7 @@
     "lanNone": "LAN Discovery finished: no scales found on the network.",
     "scaleSaved": "Scale {{name}} ({{ip}}) saved.",
     "scaleUpdated": "Scale {{name}} ({{ip}}) updated.",
+    "scaleDeleted": "Scale {{name}} ({{ip}}) deleted.",
     "importedFromScale": "Imported {{count}} PLU(s) from scale into local catalog.",
     "scaleImportSummary": "Import complete: {{imported}} record(s) saved, {{keptLocal}} conflict(s) kept local, {{unchanged}} unchanged.",
     "scaleImportEmpty": "No new records to import ({{unchanged}} unchanged).",
