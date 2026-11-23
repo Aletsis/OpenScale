@@ -222,6 +222,12 @@ impl ScaleManager {
         scale_id: Uuid,
         driver: Box<dyn ScaleDriver>,
     ) -> ScaleHandle {
+        // Cleanly close any existing actor for this scale before spawning a new one,
+        // freeing the single TCP slot on XS scales before the new actor connects.
+        if let Some(previous) = self.actors.write().await.remove(&scale_id) {
+            let _ = previous.disconnect().await;
+        }
+
         let capabilities = driver.capabilities();
         let (tx, rx) = mpsc::channel(64);
         let events = self.events.clone();

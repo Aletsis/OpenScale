@@ -43,7 +43,18 @@ impl SyncEngine {
     /// Reads all PLUs from a physical scale and imports them into the local SQLite Master Catalog.
     pub async fn import_from_scale(&self, scale_id: Uuid) -> Result<usize, AppError> {
         let handle = self.scales.get(scale_id).await?;
-        let remote_plus = handle.list_plus(None, None).await?;
+        let remote_plus = match handle.list_plus(None, None).await {
+            Ok(list) => list,
+            Err(AppError::Driver(
+                openscale_driver::DriverError::NotConnected
+                | openscale_driver::DriverError::Io(_)
+                | openscale_driver::DriverError::Timeout,
+            )) => {
+                handle.connect().await?;
+                handle.list_plus(None, None).await?
+            }
+            Err(err) => return Err(err),
+        };
         let plu_repo = PluRepository::new(self.db.pool().clone());
 
         let now = Utc::now().to_rfc3339();
@@ -94,6 +105,21 @@ impl SyncEngine {
                     self.record_checksum(scale_id, plu.key, &plu.delta_hash, &now)
                         .await?;
                     sent_plus += 1;
+                }
+                Err(AppError::Driver(
+                    openscale_driver::DriverError::NotConnected
+                    | openscale_driver::DriverError::Io(_)
+                    | openscale_driver::DriverError::Timeout,
+                )) => {
+                    if handle.connect().await.is_ok()
+                        && handle.upsert_plu(plu.clone()).await.is_ok()
+                    {
+                        self.record_checksum(scale_id, plu.key, &plu.delta_hash, &now)
+                            .await?;
+                        sent_plus += 1;
+                    } else {
+                        failed_plus += 1;
+                    }
                 }
                 Err(_) => {
                     failed_plus += 1;

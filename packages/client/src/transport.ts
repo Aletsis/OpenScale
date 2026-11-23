@@ -1,4 +1,12 @@
-import type { DiscoveredScale, Plu, PluKey, Scale, ScaleEvent } from "./types.js";
+import type {
+  DiscoveredScale,
+  Plu,
+  PluKey,
+  Scale,
+  ScaleEvent,
+  SyncMode,
+  SyncReport,
+} from "./types.js";
 
 export type Unsubscribe = () => void;
 
@@ -18,6 +26,10 @@ export interface OpenScaleTransport {
   getPlu(key: PluKey): Promise<Plu | null>;
   upsertPlu(plu: Plu): Promise<Plu>;
   deletePlu(key: PluKey): Promise<boolean>;
+
+  // Synchronization
+  importFromScale(scaleId: string): Promise<number>;
+  syncScale(scaleId: string, mode: SyncMode): Promise<SyncReport>;
 
   // Real-time events
   subscribe(listener: (event: ScaleEvent) => void): Unsubscribe;
@@ -96,6 +108,19 @@ export class HttpWsTransport implements OpenScaleTransport {
   async deletePlu(key: PluKey): Promise<boolean> {
     await this.request<void>(`/api/v1/plus/${key.did}/${key.plu}`, { method: "DELETE" });
     return true;
+  }
+
+  importFromScale(scaleId: string): Promise<number> {
+    return this.request<number>(`/api/v1/scales/${encodeURIComponent(scaleId)}/import`, {
+      method: "POST",
+    });
+  }
+
+  syncScale(scaleId: string, mode: SyncMode): Promise<SyncReport> {
+    return this.request<SyncReport>(`/api/v1/scales/${encodeURIComponent(scaleId)}/sync`, {
+      method: "POST",
+      body: JSON.stringify({ mode }),
+    });
   }
 
   subscribe(listener: (event: ScaleEvent) => void): Unsubscribe {

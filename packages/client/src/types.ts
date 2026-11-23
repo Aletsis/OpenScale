@@ -116,3 +116,19 @@ export type ScaleEvent =
       scale_id: string;
       weight: LiveWeight;
     };
+
+export type SyncMode = "delta" | "full";
+
+export interface SyncReport {
+  scale_id: string;
+  mode: SyncMode;
+  total_catalog_plus: number;
+  sent_plus: number;
+  skipped_unchanged: number;
+  failed_plus: number;
+}
+
+export interface BulkPriceAdjustment {
+  mode: "percent" | "fixed_cents";
+  value: number;
+}

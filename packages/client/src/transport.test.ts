@@ -126,6 +126,26 @@ describe("HttpWsTransport", () => {
     );
   });
 
+  it("calls importFromScale and syncScale endpoints", async () => {
+    const report = {
+      scale_id: "scale-1",
+      mode: "delta" as const,
+      total_catalog_plus: 10,
+      sent_plus: 2,
+      skipped_unchanged: 8,
+      failed_plus: 0,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJsonResponse(740))
+      .mockResolvedValueOnce(mockJsonResponse(report));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const transport = new HttpWsTransport({ baseUrl: "http://localhost:8080" });
+    expect(await transport.importFromScale("scale-1")).toBe(740);
+    expect(await transport.syncScale("scale-1", "delta")).toEqual(report);
+  });
+
   it("throws a descriptive error when API responds with non-OK status", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("Forbidden", { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);

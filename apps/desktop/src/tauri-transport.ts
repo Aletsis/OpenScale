@@ -5,6 +5,8 @@ import type {
   PluKey,
   Scale,
   ScaleEvent,
+  SyncMode,
+  SyncReport,
   Unsubscribe,
 } from "@openscale/client";
 import { invoke } from "@tauri-apps/api/core";
@@ -40,6 +42,14 @@ export class TauriIpcTransport implements OpenScaleTransport {
 
   deletePlu(key: PluKey): Promise<boolean> {
     return invoke<boolean>("delete_plu", { key });
+  }
+
+  importFromScale(scaleId: string): Promise<number> {
+    return invoke<number>("import_from_scale", { scaleId });
+  }
+
+  syncScale(scaleId: string, mode: SyncMode): Promise<SyncReport> {
+    return invoke<SyncReport>("sync_scale", { scaleId, mode });
   }
 
   subscribe(listener: (event: ScaleEvent) => void): Unsubscribe {

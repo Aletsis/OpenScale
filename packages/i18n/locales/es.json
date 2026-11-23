@@ -15,6 +15,11 @@
   "scales": {
     "discover": "Descubrir Básculas",
     "discovering": "Escaneando red...",
+    "registered": "Básculas Registradas",
+    "lanDiscovery": "Descubrimiento LAN",
+    "importCatalog": "Importar PLUs",
+    "deltaSync": "Delta Sync",
+    "fullSync": "Full Sync",
     "status": {
       "online": "En línea",
       "offline": "Sin conexión",
@@ -26,6 +31,11 @@
   "catalog": {
     "title": "Catálogo Maestro de PLUs",
     "addPlu": "Nuevo PLU",
+    "editPlu": "Editar PLU",
+    "bulkPrice": "Precio Masivo",
+    "importFile": "Importar CSV/Excel",
+    "exportCsv": "Exportar CSV",
+    "exportXlsx": "Exportar Excel",
     "searchPlaceholder": "Buscar por PLU, descripción o EAN...",
     "columns": {
       "did": "Depto",
@@ -33,13 +43,16 @@
       "description": "Descripción",
       "price1": "Precio",
       "productType": "Tipo",
-      "ean": "EAN"
+      "ean": "EAN",
+      "actions": "Acciones"
     }
   },
   "common": {
     "save": "Guardar",
     "cancel": "Cancelar",
+    "edit": "Editar",
     "delete": "Eliminar",
+    "apply": "Aplicar",
     "refresh": "Actualizar",
     "language": "Idioma",
     "noData": "No se encontraron registros"

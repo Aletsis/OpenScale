@@ -51,6 +51,15 @@ const mockTransport: OpenScaleTransport = {
   getPlu: async () => INITIAL_PLUS[0] ?? null,
   upsertPlu: async (p) => p,
   deletePlu: async () => true,
+  importFromScale: async () => 1,
+  syncScale: async (scaleId, mode) => ({
+    scale_id: scaleId,
+    mode,
+    total_catalog_plus: 1,
+    sent_plus: 1,
+    skipped_unchanged: 0,
+    failed_plus: 0,
+  }),
   subscribe: () => () => undefined,
 };
 

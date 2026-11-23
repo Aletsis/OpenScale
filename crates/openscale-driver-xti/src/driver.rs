@@ -58,20 +58,54 @@ impl XtiDriver {
         action_id: &str,
         fields: &[(String, Vec<u8>)],
     ) -> Result<ResponseBatch, DriverError> {
+        // Bulk table reads (e.g. PLU:READ with 700+ records) transfer the entire catalog
+        // in one response batch and need a wider read deadline than single-record ops.
+        let read_timeout = if action_id == "READ" {
+            self.config.io_timeout.max(Duration::from_secs(30))
+        } else {
+            self.config.io_timeout
+        };
+        self.send_instruction_with_timeout(table_id, action_id, fields, read_timeout)
+            .await
+    }
+
+    async fn send_instruction_with_timeout(
+        &mut self,
+        table_id: &str,
+        action_id: &str,
+        fields: &[(String, Vec<u8>)],
+        read_timeout: Duration,
+    ) -> Result<ResponseBatch, DriverError> {
         let payload = encode_instruction(table_id, action_id, fields);
-        let timeout = self.config.io_timeout;
-        let stream = self.stream.as_mut().ok_or(DriverError::NotConnected)?;
+        let write_timeout = self.config.io_timeout;
 
-        tokio::time::timeout(timeout, stream.write_all(&payload))
+        let batch_res: Result<ResponseBatch, DriverError> = {
+            let stream = self.stream.as_mut().ok_or(DriverError::NotConnected)?;
+            async {
+                tokio::time::timeout(write_timeout, stream.write_all(&payload))
+                    .await
+                    .map_err(|_| DriverError::Timeout)??;
+                tokio::time::timeout(write_timeout, stream.flush())
+                    .await
+                    .map_err(|_| DriverError::Timeout)??;
+                let batch = tokio::time::timeout(read_timeout, read_response_batch(stream))
+                    .await
+                    .map_err(|_| DriverError::Timeout)??;
+                Ok(batch)
+            }
             .await
-            .map_err(|_| DriverError::Timeout)??;
-        tokio::time::timeout(timeout, stream.flush())
-            .await
-            .map_err(|_| DriverError::Timeout)??;
+        };
 
-        let batch = tokio::time::timeout(timeout, read_response_batch(stream))
-            .await
-            .map_err(|_| DriverError::Timeout)??;
+        let batch = match batch_res {
+            Ok(batch) => batch,
+            Err(err) => {
+                if matches!(err, DriverError::Io(_) | DriverError::Timeout) {
+                    self.stream = None;
+                    self.banner = None;
+                }
+                return Err(err);
+            }
+        };
 
         if !batch.is_ok() {
             return Err(DriverError::Protocol {

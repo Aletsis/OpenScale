@@ -17,8 +17,8 @@ use crate::protocol::{
     ACTION_CLEAR, ACTION_REQUEST, ACTION_UPDATE, AbCmdHeader, CMD_ASSETINFO, CMD_CHANGE_PRICE,
     CMD_DATE_AND_TIME, CMD_MACHNETCONFIG, CMD_PLU_RECORD, CMD_VERSION_DETAILS, CVN_ASSETINFO,
     CVN_CHANGE_PRICE, CVN_DATE_AND_TIME, CVN_MACHNETCONFIG, CVN_PLU_RECORD, CVN_VERSION_DETAILS,
-    HEADER_LEN, STATUS_PLU_LAST_PLU, STATUS_PLU_NOT_FOUND, STATUS_SUCCESS, XS_DATA_PORT,
-    build_atomic_blocks,
+    HEADER_LEN, MAX_DATA_BLOCK_SIZE, STATUS_PLU_LAST_PLU, STATUS_PLU_NOT_FOUND, STATUS_SUCCESS,
+    XS_DATA_PORT,
 };
 
 #[derive(Debug, Clone)]
@@ -61,7 +61,9 @@ impl XsDriver {
         self.sequence
     }
 
-    /// Sends a command (atomic 1-write-per-block) and assembles all response blocks.
+    /// Sends a command using MSeriesProtocol's lockstep stop-and-wait multi-block framing:
+    /// each block (atomic 51 B header + up to 500 B chunk) is sent in a single `write_all()`
+    /// and followed immediately by reading the scale's corresponding response block.
     async fn send_command(
         &mut self,
         command_type: u16,
@@ -71,29 +73,76 @@ impl XsDriver {
     ) -> Result<(i16, Vec<u8>), DriverError> {
         let seq = self.next_seq();
         let req_header = AbCmdHeader::new_request(command_type, action, cvn, seq);
-        let frames = build_atomic_blocks(req_header, payload)?;
         let timeout = self.config.io_timeout;
 
-        let stream = self.stream.as_mut().ok_or(DriverError::NotConnected)?;
+        let result = {
+            let stream = self.stream.as_mut().ok_or(DriverError::NotConnected)?;
+            Self::exchange_blocks(stream, req_header, payload, timeout).await
+        };
 
-        for frame in &frames {
-            tokio::time::timeout(timeout, stream.write_all(frame))
+        if matches!(result, Err(DriverError::Io(_) | DriverError::Timeout)) {
+            self.stream = None;
+        }
+
+        result
+    }
+
+    async fn exchange_blocks(
+        stream: &mut TcpStream,
+        mut req_header: AbCmdHeader,
+        payload: &[u8],
+        timeout: Duration,
+    ) -> Result<(i16, Vec<u8>), DriverError> {
+        let send_total = if payload.is_empty() {
+            1usize
+        } else {
+            payload.len().div_ceil(MAX_DATA_BLOCK_SIZE)
+        };
+        if send_total > usize::from(u8::MAX) {
+            return Err(DriverError::Protocol {
+                code: None,
+                message: format!("payload requires {send_total} blocks (> 255)"),
+            });
+        }
+
+        let mut block: u8 = 1;
+        let mut total: u8 = send_total as u8;
+        let mut assembled = Vec::new();
+        let mut last_status: i16 = STATUS_SUCCESS;
+
+        while block <= total {
+            let chunk_offset = usize::from(block - 1) * MAX_DATA_BLOCK_SIZE;
+            let chunk: &[u8] = if chunk_offset < payload.len() {
+                let end = (chunk_offset + MAX_DATA_BLOCK_SIZE).min(payload.len());
+                &payload[chunk_offset..end]
+            } else {
+                &[]
+            };
+
+            req_header.block_num = block;
+            req_header.num_blocks = total;
+            let hdr_bytes = req_header.encode(chunk.len())?;
+
+            // Critical XS rule: header (51 B) + chunk must be sent in a single write_all()
+            let mut frame = Vec::with_capacity(HEADER_LEN + chunk.len());
+            frame.extend_from_slice(&hdr_bytes);
+            frame.extend_from_slice(chunk);
+
+            tokio::time::timeout(timeout, stream.write_all(&frame))
                 .await
                 .map_err(|_| DriverError::Timeout)??;
-        }
-        tokio::time::timeout(timeout, stream.flush())
-            .await
-            .map_err(|_| DriverError::Timeout)??;
+            tokio::time::timeout(timeout, stream.flush())
+                .await
+                .map_err(|_| DriverError::Timeout)??;
 
-        let mut assembled = Vec::new();
-
-        let last_status = loop {
             let mut hdr_buf = [0u8; HEADER_LEN];
             tokio::time::timeout(timeout, stream.read_exact(&mut hdr_buf))
                 .await
                 .map_err(|_| DriverError::Timeout)??;
 
             let resp_hdr = AbCmdHeader::decode(&hdr_buf)?;
+            last_status = resp_hdr.status;
+
             let chunk_len = resp_hdr.payload_len();
             if chunk_len > 0 {
                 let start = assembled.len();
@@ -103,10 +152,17 @@ impl XsDriver {
                     .map_err(|_| DriverError::Timeout)??;
             }
 
-            if resp_hdr.block_num >= resp_hdr.num_blocks || resp_hdr.num_blocks <= 1 {
-                break resp_hdr.status;
+            if last_status != STATUS_SUCCESS {
+                break;
             }
-        };
+            if resp_hdr.num_blocks > total {
+                total = resp_hdr.num_blocks;
+            }
+            if block == u8::MAX {
+                break;
+            }
+            block += 1;
+        }
 
         Ok((last_status, assembled))
     }
@@ -159,16 +215,40 @@ impl ScaleDriver for XsDriver {
     }
 
     async fn connect(&mut self) -> Result<ScaleInfo, DriverError> {
+        // Close any previous socket cleanly before opening a new one (XS only allows 1 active TCP slot).
+        let _ = self.disconnect().await;
+
         let addr = format!("{}:{}", self.config.host, self.config.port);
-        let stream = tokio::time::timeout(self.config.io_timeout, TcpStream::connect(&addr))
-            .await
-            .map_err(|_| DriverError::Timeout)?
-            .map_err(|e| DriverError::ConnectionFailed(format!("{addr}: {e}")))?;
+        let retry_delays = [Duration::from_millis(400), Duration::from_millis(800)];
+        let mut attempt = 0usize;
+
+        let stream = loop {
+            match tokio::time::timeout(self.config.io_timeout, TcpStream::connect(&addr)).await {
+                Ok(Ok(stream)) => break stream,
+                Ok(Err(e))
+                    if e.kind() == std::io::ErrorKind::ConnectionRefused
+                        && attempt < retry_delays.len() =>
+                {
+                    tokio::time::sleep(retry_delays[attempt]).await;
+                    attempt += 1;
+                }
+                Ok(Err(e)) => {
+                    return Err(DriverError::ConnectionFailed(format!("{addr}: {e}")));
+                }
+                Err(_) => return Err(DriverError::Timeout),
+            }
+        };
 
         // Critical XS rule: TCP_NODELAY = true (paired with atomic write_all)
         stream.set_nodelay(true)?;
         self.stream = Some(stream);
-        self.get_info().await
+        match self.get_info().await {
+            Ok(info) => Ok(info),
+            Err(err) => {
+                self.stream = None;
+                Err(err)
+            }
+        }
     }
 
     async fn disconnect(&mut self) -> Result<(), DriverError> {
@@ -422,7 +502,7 @@ impl ScaleDriver for XsDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::KIND_RESPONSE;
+    use crate::protocol::{KIND_RESPONSE, build_atomic_blocks};
     use openscale_domain::types::new_id;
     use openscale_domain::{ProductType, SyncMetadata};
     use std::collections::BTreeMap;
@@ -437,9 +517,14 @@ mod tests {
             let store_id = new_id();
             let mut plus: BTreeMap<PluKey, Vec<u8>> = BTreeMap::new();
 
-            // Pre-populate 5 PLUs to test binary search count_plus()
+            // Pre-populate 5 PLUs (PLU 5 has >500 B payload to exercise lockstep multi-block READ)
             for n in 1..=5u64 {
                 let key = PluKey::new(1, n).unwrap();
+                let text_areas = if n == 5 {
+                    vec!["INGREDIENTES: ".to_string() + &"CARNE DE RES, SAL, ESPECIAS. ".repeat(20)]
+                } else {
+                    vec![]
+                };
                 let plu = Plu {
                     id: new_id(),
                     key,
@@ -462,7 +547,7 @@ mod tests {
                     date_print_control_2: 0,
                     tax_rate_id_1: 0,
                     tax_rate_id_2: 0,
-                    text_areas: vec![],
+                    text_areas,
                     delta_hash: String::new(),
                     meta: SyncMetadata::new(store_id),
                 };
@@ -475,6 +560,24 @@ mod tests {
                 let mut payload = vec![0u8; req.payload_len()];
                 if !payload.is_empty() {
                     socket.read_exact(&mut payload).await.unwrap();
+                }
+
+                // Lockstep multi-block request reception (e.g. PLU:WRITE > 500 B)
+                let mut current_req = req;
+                while current_req.block_num < current_req.num_blocks {
+                    let mut ack_hdr = current_req;
+                    ack_hdr.command_or_response = KIND_RESPONSE;
+                    ack_hdr.status = STATUS_SUCCESS;
+                    let ack = ack_hdr.encode(0).unwrap();
+                    socket.write_all(&ack).await.unwrap();
+
+                    socket.read_exact(&mut hdr_buf).await.unwrap();
+                    current_req = AbCmdHeader::decode(&hdr_buf).unwrap();
+                    let mut chunk = vec![0u8; current_req.payload_len()];
+                    if !chunk.is_empty() {
+                        socket.read_exact(&mut chunk).await.unwrap();
+                        payload.extend_from_slice(&chunk);
+                    }
                 }
 
                 let (status, resp_payload): (i16, Vec<u8>) = match (req.command_type, req.action) {
@@ -558,12 +661,22 @@ mod tests {
                     _ => (-1117, vec![]),
                 };
 
-                let mut resp_hdr = req;
+                let mut resp_hdr = current_req;
                 resp_hdr.command_or_response = KIND_RESPONSE;
                 resp_hdr.status = status;
                 let frames = build_atomic_blocks(resp_hdr, &resp_payload).unwrap();
-                for frame in frames {
-                    socket.write_all(&frame).await.unwrap();
+                for (i, frame) in frames.iter().enumerate() {
+                    if i > 0 {
+                        // Lockstep: wait for client continuation request before sending next block
+                        socket.read_exact(&mut hdr_buf).await.unwrap();
+                        let cont_req = AbCmdHeader::decode(&hdr_buf).unwrap();
+                        assert_eq!(cont_req.block_num, (i + 1) as u8);
+                        if cont_req.payload_len() > 0 {
+                            let mut discard = vec![0u8; cont_req.payload_len()];
+                            socket.read_exact(&mut discard).await.unwrap();
+                        }
+                    }
+                    socket.write_all(frame).await.unwrap();
                 }
             }
         });
@@ -599,7 +712,19 @@ mod tests {
             .unwrap();
 
         assert_eq!(driver.count_plus().await.unwrap(), 5);
-        assert_eq!(driver.list_plus(None, None).await.unwrap().len(), 5);
+        let listed = driver.list_plus(None, None).await.unwrap();
+        assert_eq!(listed.len(), 5);
+        assert!(listed[4].text_areas[0].len() > 500);
+
+        // Exercise lockstep multi-block WRITE (>500 B) and read-back
+        let mut long_plu = listed[4].clone();
+        long_plu.key = PluKey::new(1, 6).unwrap();
+        long_plu.description = "MULTI BLOCK WRITE".to_string();
+        driver.upsert_plu(&long_plu).await.unwrap();
+        let read_back = driver.read_plu(long_plu.key).await.unwrap().unwrap();
+        assert_eq!(read_back.description, "MULTI BLOCK WRITE");
+        assert_eq!(read_back.text_areas, long_plu.text_areas);
+        driver.delete_plu(long_plu.key).await.unwrap();
 
         let key = PluKey::new(1, 3).unwrap();
         driver

@@ -93,7 +93,13 @@ pub fn run() {
 
             let core = tauri::async_runtime::block_on(async move {
                 let db = Database::connect(&StorageConfig::new(db_path)).await?;
-                Ok::<OpenScaleApp, openscale_storage::StorageError>(OpenScaleApp::new(db))
+                let app_core = OpenScaleApp::new(db);
+                if let Ok(saved_scales) = app_core.list_scales().await {
+                    for scale in &saved_scales {
+                        app_core.scales.register_scale(scale).await;
+                    }
+                }
+                Ok::<OpenScaleApp, openscale_storage::StorageError>(app_core)
             })?;
 
             // Forward real-time ScaleManager events to Tauri frontend

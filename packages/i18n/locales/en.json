@@ -15,6 +15,11 @@
   "scales": {
     "discover": "Discover Scales",
     "discovering": "Scanning network...",
+    "registered": "Registered Scales",
+    "lanDiscovery": "LAN Discovery",
+    "importCatalog": "Import PLUs",
+    "deltaSync": "Delta Sync",
+    "fullSync": "Full Sync",
     "status": {
       "online": "Online",
       "offline": "Offline",
@@ -26,6 +31,11 @@
   "catalog": {
     "title": "Master PLU Catalog",
     "addPlu": "New PLU",
+    "editPlu": "Edit PLU",
+    "bulkPrice": "Bulk Price",
+    "importFile": "Import CSV/Excel",
+    "exportCsv": "Export CSV",
+    "exportXlsx": "Export Excel",
     "searchPlaceholder": "Search by PLU, description, or EAN...",
     "columns": {
       "did": "Dept",
@@ -33,13 +43,16 @@
       "description": "Description",
       "price1": "Price",
       "productType": "Type",
-      "ean": "EAN"
+      "ean": "EAN",
+      "actions": "Actions"
     }
   },
   "common": {
     "save": "Save",
     "cancel": "Cancel",
+    "edit": "Edit",
     "delete": "Delete",
+    "apply": "Apply",
     "refresh": "Refresh",
     "language": "Language",
     "noData": "No records found"
