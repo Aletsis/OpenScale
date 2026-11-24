@@ -134,14 +134,25 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          PUSH_REFS=("${RELEASE_TAG}")
           if ! git diff --quiet; then
             git add -A
             git commit -m "chore(release): ${RELEASE_TAG} [skip ci]"
-            git push origin HEAD:main
+            PUSH_REFS=("HEAD:main" "${RELEASE_TAG}")
           fi
 
           git tag -a "${RELEASE_TAG}" -m "Release ${RELEASE_TAG}"
-          git push origin "${RELEASE_TAG}"
+
+          for attempt in 1 2 3; do
+            if git push --atomic origin "${PUSH_REFS[@]}"; then
+              break
+            fi
+            if [ "${attempt}" -eq 3 ]; then
+              exit 1
+            fi
+            echo "git push failed (attempt ${attempt}/3), retrying in 5s..."
+            sleep 5
+          done
 
           if [ -n "${PREVIOUS_TAG}" ]; then
             gh release create "${RELEASE_TAG}" \
