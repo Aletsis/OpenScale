@@ -211,6 +211,33 @@ impl OpenScaleApp {
         Ok(fmt)
     }
 
+    /// Reads all active/populated label formats directly from a registered scale's TCP actor.
+    pub async fn list_scale_label_formats(
+        &self,
+        scale_id: Uuid,
+    ) -> Result<Vec<LabelFormat>, AppError> {
+        let handle = self.scales.get(scale_id).await?;
+        if handle.ping().await.is_err() {
+            handle.connect().await?;
+        }
+        handle.list_label_formats().await
+    }
+
+    /// Writes a label format to a registered scale and persists it to the local SQLite catalog.
+    pub async fn write_scale_label_format(
+        &self,
+        scale_id: Uuid,
+        fmt: LabelFormat,
+    ) -> Result<LabelFormat, AppError> {
+        let handle = self.scales.get(scale_id).await?;
+        if handle.ping().await.is_err() {
+            handle.connect().await?;
+        }
+        handle.upsert_label_format(fmt.clone()).await?;
+        self.master_tables_repo().upsert_label_format(&fmt).await?;
+        Ok(fmt)
+    }
+
     pub async fn preview_import_from_scale(
         &self,
         scale_id: Uuid,

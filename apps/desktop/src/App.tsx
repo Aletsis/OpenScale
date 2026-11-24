@@ -1212,9 +1212,7 @@ export function App() {
 
           {activeTab === "labels" && (
             <>
-              <h2 className="text-xl font-semibold tracking-tight">
-                Label Designer (WYSIWYG — PFID 0..99)
-              </h2>
+              <h2 className="text-xl font-semibold tracking-tight">{t("labels.title")}</h2>
               <LabelDesignerView
                 scales={scales}
                 plus={allPlus}
@@ -1222,7 +1220,7 @@ export function App() {
               />
               <div className="border-t border-border pt-4">
                 <h3 className="mb-3 text-sm font-semibold text-muted-foreground">
-                  Raw Field Inspector & Scale-to-Scale Clone
+                  {t("labels.rawInspectorTitle")}
                 </h3>
                 <LabelFormatsView
                   scales={scales}

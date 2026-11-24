@@ -209,6 +209,31 @@ async fn upsert_label_format(
 }
 
 #[tauri::command]
+async fn scale_list_label_formats(
+    state: State<'_, DesktopState>,
+    scale_id: Uuid,
+) -> Result<Vec<LabelFormat>, String> {
+    state
+        .app
+        .list_scale_label_formats(scale_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn scale_write_label_format(
+    state: State<'_, DesktopState>,
+    scale_id: Uuid,
+    fmt: LabelFormat,
+) -> Result<LabelFormat, String> {
+    state
+        .app
+        .write_scale_label_format(scale_id, fmt)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn sync_scale(
     state: State<'_, DesktopState>,
     scale_id: Uuid,
@@ -472,6 +497,25 @@ async fn xs_write_machine_params(
 }
 
 #[tauri::command]
+async fn xs_list_label_formats(
+    host: String,
+    port: Option<u16>,
+) -> Result<Vec<LabelFormatRecord>, String> {
+    let mut cfg = XsDriverConfig::new(host, DEFAULT_LOCAL_STORE_ID);
+    if let Some(p) = port {
+        cfg.port = p;
+    }
+    let mut driver = XsDriver::new(cfg);
+    driver.connect().await.map_err(|e| e.to_string())?;
+    let res = driver
+        .list_label_format_records()
+        .await
+        .map_err(|e| e.to_string());
+    let _ = driver.disconnect().await;
+    res
+}
+
+#[tauri::command]
 async fn xs_read_label_format(
     host: String,
     port: Option<u16>,
@@ -583,6 +627,8 @@ pub fn run() {
             upsert_barcode_format,
             list_label_formats,
             upsert_label_format,
+            scale_list_label_formats,
+            scale_write_label_format,
             sync_master_tables,
             capture_sales_snapshot,
             list_sales_snapshots,
@@ -596,6 +642,7 @@ pub fn run() {
             xs_service_action,
             xs_read_machine_params,
             xs_write_machine_params,
+            xs_list_label_formats,
             xs_read_label_format,
             xs_write_label_format,
         ])

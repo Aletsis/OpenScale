@@ -17,7 +17,7 @@ use crate::codec::{
     decode_version_details, encode_change_price, encode_datetime, encode_plu_search_header,
     encode_plu_write,
 };
-use crate::label_formats::LabelFormatRecord;
+use crate::label_formats::{LABEL_FORMAT_LEN, LabelField, LabelFormatRecord};
 use crate::machine_params::MachineParameters;
 use crate::master_tables::{
     XsBarcodeFormatDef, decode_barcode_format_read, decode_department_read,
@@ -271,6 +271,22 @@ impl XsDriver {
                 ),
             })
         }
+    }
+
+    pub async fn list_label_format_records(&mut self) -> Result<Vec<LabelFormatRecord>, DriverError> {
+        let mut records = Vec::new();
+        for pfid in 0u8..=99 {
+            match self.read_label_format(pfid).await {
+                Ok(rec) => {
+                    if rec.active || !rec.name.trim().is_empty() || !rec.fields.is_empty() {
+                        records.push(rec);
+                    }
+                }
+                Err(DriverError::Protocol { .. }) => continue,
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(records)
     }
 
     async fn read_plu_with_flags(
@@ -847,18 +863,45 @@ impl ScaleDriver for XsDriver {
             code: None,
             message: format!("XS label format PFID {} out of range (0..=99)", fmt.pfid),
         })?;
-        let raw = fmt
-            .raw_binary
-            .as_ref()
-            .ok_or_else(|| DriverError::Protocol {
-                code: None,
-                message: "XS label format requires raw 898-byte binary image".to_string(),
-            })?;
-        let mut rec = LabelFormatRecord::decode(raw)?;
+        let mut rec = match fmt.raw_binary.as_ref() {
+            Some(raw) if raw.len() >= LABEL_FORMAT_LEN => LabelFormatRecord::decode(raw)?,
+            _ => LabelFormatRecord {
+                pfid: pfid_u8,
+                orientation: 0,
+                active: true,
+                width_hundredths_mm: fmt.width_tenths_mm.saturating_mul(10),
+                name: fmt.name.clone(),
+                fields: Vec::new(),
+                raw: vec![0u8; LABEL_FORMAT_LEN],
+            },
+        };
         rec.pfid = pfid_u8;
-        if !fmt.name.trim().is_empty() {
-            rec.name = fmt.name.clone();
+        rec.name = fmt.name.clone();
+
+        if let Ok(def) = serde_json::from_str::<serde_json::Value>(&fmt.definition_json) {
+            if let Some(orientation) = def.get("orientation").and_then(serde_json::Value::as_u64) {
+                rec.orientation = orientation as u8;
+            }
+            if let Some(active) = def.get("active").and_then(serde_json::Value::as_bool) {
+                rec.active = active;
+            }
+            if let Some(width_hmm) = def
+                .get("width_hundredths_mm")
+                .and_then(serde_json::Value::as_u64)
+            {
+                rec.width_hundredths_mm = width_hmm as u16;
+            } else if fmt.width_tenths_mm > 0 {
+                rec.width_hundredths_mm = fmt.width_tenths_mm.saturating_mul(10);
+            }
+            if let Some(fields_val) = def.get("fields")
+                && let Ok(fields) = serde_json::from_value::<Vec<LabelField>>(fields_val.clone())
+            {
+                rec.fields = fields;
+            }
+        } else if fmt.width_tenths_mm > 0 {
+            rec.width_hundredths_mm = fmt.width_tenths_mm.saturating_mul(10);
         }
+
         Self::write_label_format(self, &rec).await
     }
 

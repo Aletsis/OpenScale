@@ -3,17 +3,21 @@ import { describe, expect, it } from "vitest";
 import {
   LABEL_FORMAT_BYTE_LIMIT,
   createBlankLabelFormat,
+  estimateLabelHeightMm,
+  findNextFreePfid,
   findNextFreeSlot,
   getAbmlFontSpec,
   hundredthsToMm,
+  labelFormatToModel,
   mmToHundredths,
   mmToTenths,
+  modelToLabelFormat,
   resolveFieldPreviewText,
   rotationDegrees,
   tenthsToMm,
   validateLabelFormat,
 } from "./label-designer.js";
-import type { Plu } from "./types.js";
+import type { LabelFormat, Plu } from "./types.js";
 
 const SAMPLE_PLU: Plu = {
   id: "plu-1",
@@ -138,5 +142,66 @@ describe("label-designer engine", () => {
     expect(resolveFieldPreviewText(mk(57), SAMPLE_PLU, 0.5)).toBe("");
     expect(resolveFieldPreviewText(mk(58), SAMPLE_PLU, 0.5)).toBe("");
     expect(resolveFieldPreviewText(mk(99), null, 0.5)).toBe("FT 99");
+  });
+
+  it("converts between domain LabelFormat and designer LabelFormatModel losslessly", () => {
+    const raw = new Array<number>(LABEL_FORMAT_BYTE_LIMIT).fill(0);
+    raw[0] = 3;
+    raw[2] = 1;
+
+    const domainFmt: LabelFormat = {
+      id: "fmt-3",
+      pfid: 3,
+      name: "CARNICERIA 59x40",
+      width_tenths_mm: 590,
+      height_tenths_mm: 400,
+      definition_json: JSON.stringify({
+        orientation: 1,
+        active: true,
+        width_hundredths_mm: 5900,
+        fields: [
+          {
+            slot: 0,
+            field_type: 1,
+            orientation: 0,
+            style: 49,
+            x1: 20,
+            y1: 20,
+            x2: 500,
+            y2: 460,
+            font: "C",
+            dsr: 0,
+          },
+        ],
+      }),
+      raw_binary: raw,
+      meta: {
+        store_id: "store-1",
+        sync_version: 2,
+        updated_at: "2026-11-23T00:00:00Z",
+        deleted_at: null,
+      },
+    };
+
+    const model = labelFormatToModel(domainFmt);
+    expect(model.pfid).toBe(3);
+    expect(model.orientation).toBe(1);
+    expect(model.active).toBe(true);
+    expect(model.width_hundredths_mm).toBe(5900);
+    expect(model.name).toBe("CARNICERIA 59x40");
+    expect(model.fields).toHaveLength(1);
+    expect(model.raw).toHaveLength(LABEL_FORMAT_BYTE_LIMIT);
+    expect(estimateLabelHeightMm(model.fields)).toBe(50);
+
+    const edited = { ...model, name: "CARNICERIA EDITADA" };
+    const back = modelToLabelFormat(edited, "store-1", domainFmt);
+    expect(back.id).toBe("fmt-3");
+    expect(back.pfid).toBe(3);
+    expect(back.name).toBe("CARNICERIA EDITADA");
+    expect(back.meta.sync_version).toBe(3);
+    expect(JSON.parse(back.definition_json).fields).toHaveLength(1);
+
+    expect(findNextFreePfid([1, 2, 3], 98)).toBe(98);
+    expect(findNextFreePfid([1, 2, 98], 98)).toBe(3);
   });
 });

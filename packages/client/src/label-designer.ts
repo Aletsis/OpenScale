@@ -1,4 +1,4 @@
-import type { Plu } from "./types.js";
+import type { LabelFormat, Plu } from "./types.js";
 
 export const LABEL_FORMAT_BYTE_LIMIT = 898;
 export const LABEL_MAX_SLOTS = 50;
@@ -134,6 +134,119 @@ export function createBlankLabelFormat(pfid = 98, widthMm = 59): LabelFormatMode
     name: `Custom ${widthMm}mm`,
     fields: [],
     raw: new Array<number>(LABEL_FORMAT_BYTE_LIMIT).fill(0),
+  };
+}
+
+export function estimateLabelHeightMm(
+  fields: readonly LabelFieldModel[],
+  minHeightMm = 40,
+): number {
+  const maxY = fields.reduce((acc, f) => Math.max(acc, tenthsToMm(f.y2)), 0);
+  return Math.max(minHeightMm, Math.ceil(maxY + 4));
+}
+
+export function findNextFreePfid(existingPfids: readonly number[], preferred = 98): number {
+  const used = new Set(existingPfids);
+  if (preferred >= 0 && preferred <= 99 && !used.has(preferred)) {
+    return preferred;
+  }
+  for (let pfid = 1; pfid <= 99; pfid++) {
+    if (!used.has(pfid)) {
+      return pfid;
+    }
+  }
+  return used.has(0) ? preferred : 0;
+}
+
+/**
+ * Converts a domain `LabelFormat` (from SQLite or a scale actor) into an editable `LabelFormatModel`.
+ */
+export function labelFormatToModel(fmt: LabelFormat): LabelFormatModel {
+  let orientation = 0;
+  let active = true;
+  let widthHundredths = fmt.width_tenths_mm > 0 ? fmt.width_tenths_mm * 10 : 5900;
+  let fields: LabelFieldModel[] = [];
+
+  try {
+    const parsed = JSON.parse(fmt.definition_json) as {
+      orientation?: unknown;
+      active?: unknown;
+      width_hundredths_mm?: unknown;
+      fields?: unknown;
+    };
+    if (typeof parsed.orientation === "number") {
+      orientation = parsed.orientation;
+    }
+    if (typeof parsed.active === "boolean") {
+      active = parsed.active;
+    }
+    if (typeof parsed.width_hundredths_mm === "number" && parsed.width_hundredths_mm > 0) {
+      widthHundredths = parsed.width_hundredths_mm;
+    }
+    if (Array.isArray(parsed.fields)) {
+      fields = parsed.fields as LabelFieldModel[];
+    }
+  } catch {
+    // Fallback to defaults if definition_json is empty or malformed
+  }
+
+  const raw =
+    fmt.raw_binary && fmt.raw_binary.length >= LABEL_FORMAT_BYTE_LIMIT
+      ? fmt.raw_binary.slice(0, LABEL_FORMAT_BYTE_LIMIT)
+      : new Array<number>(LABEL_FORMAT_BYTE_LIMIT).fill(0);
+
+  return {
+    pfid: fmt.pfid,
+    orientation,
+    active,
+    width_hundredths_mm: widthHundredths,
+    name: fmt.name,
+    fields,
+    raw,
+  };
+}
+
+/**
+ * Converts an edited `LabelFormatModel` back into a domain `LabelFormat` for scale write & SQLite persistence.
+ */
+export function modelToLabelFormat(
+  model: LabelFormatModel,
+  storeId: string,
+  existing?: LabelFormat | null,
+): LabelFormat {
+  const now = new Date().toISOString();
+  const definition_json = JSON.stringify({
+    orientation: model.orientation,
+    active: model.active,
+    width_hundredths_mm: model.width_hundredths_mm,
+    fields: model.fields,
+  });
+
+  const raw_binary =
+    model.raw.length >= LABEL_FORMAT_BYTE_LIMIT
+      ? model.raw.slice(0, LABEL_FORMAT_BYTE_LIMIT)
+      : new Array<number>(LABEL_FORMAT_BYTE_LIMIT).fill(0);
+
+  return {
+    id: existing?.id ?? crypto.randomUUID(),
+    pfid: model.pfid,
+    name: model.name,
+    width_tenths_mm: Math.round(model.width_hundredths_mm / 10),
+    height_tenths_mm: existing?.height_tenths_mm ?? 0,
+    definition_json,
+    raw_binary,
+    meta: existing
+      ? {
+          ...existing.meta,
+          sync_version: existing.meta.sync_version + 1,
+          updated_at: now,
+        }
+      : {
+          store_id: storeId,
+          sync_version: 1,
+          updated_at: now,
+          deleted_at: null,
+        },
   };
 }
 
