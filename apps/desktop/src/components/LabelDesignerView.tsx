@@ -254,7 +254,9 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
       return "";
     }
     const meta = LABEL_FIELD_TYPES.find((item) => item.ft === selectedField.field_type);
-    return meta ? `${meta.label} (FT ${selectedField.field_type})` : `FT ${selectedField.field_type}`;
+    return meta
+      ? `${meta.label} (FT ${selectedField.field_type})`
+      : `FT ${selectedField.field_type}`;
   }, [selectedField]);
 
   const updateLabel = (updater: (prev: LabelFormatModel) => LabelFormatModel) => {

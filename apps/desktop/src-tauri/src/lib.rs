@@ -186,9 +186,7 @@ async fn apply_scale_import(
 }
 
 #[tauri::command]
-async fn list_label_formats(
-    state: State<'_, DesktopState>,
-) -> Result<Vec<LabelFormat>, String> {
+async fn list_label_formats(state: State<'_, DesktopState>) -> Result<Vec<LabelFormat>, String> {
     state
         .app
         .list_label_formats()
@@ -441,7 +439,8 @@ async fn xs_service_read_diag_log(
     port: Option<u16>,
     log_type: String,
 ) -> Result<Vec<String>, String> {
-    run_service_op!(state, host, port, |c| c.read_diagnostic_log(&log_type, false))
+    run_service_op!(state, host, port, |c| c
+        .read_diagnostic_log(&log_type, false))
 }
 
 #[tauri::command]
@@ -461,7 +460,10 @@ async fn xs_service_action(
 }
 
 #[tauri::command]
-async fn xs_read_machine_params(host: String, port: Option<u16>) -> Result<MachineParameters, String> {
+async fn xs_read_machine_params(
+    host: String,
+    port: Option<u16>,
+) -> Result<MachineParameters, String> {
     let mut cfg = XsDriverConfig::new(host, DEFAULT_LOCAL_STORE_ID);
     if let Some(p) = port {
         cfg.port = p;

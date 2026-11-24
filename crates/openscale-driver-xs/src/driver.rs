@@ -273,12 +273,14 @@ impl XsDriver {
         }
     }
 
-    pub async fn list_label_format_records(&mut self) -> Result<Vec<LabelFormatRecord>, DriverError> {
+    pub async fn list_label_format_records(
+        &mut self,
+    ) -> Result<Vec<LabelFormatRecord>, DriverError> {
         let mut records = Vec::new();
         for pfid in 0u8..=99 {
             match self.read_label_format(pfid).await {
                 Ok(rec) => {
-                    if rec.active || !rec.name.trim().is_empty() || !rec.fields.is_empty() {
+                    if is_populated_label_format(&rec) {
                         records.push(rec);
                     }
                 }
@@ -328,6 +330,57 @@ impl XsDriver {
             }),
         }
     }
+}
+
+fn is_populated_label_format(rec: &LabelFormatRecord) -> bool {
+    rec.active || !rec.name.trim().is_empty() || !rec.fields.is_empty()
+}
+
+fn domain_label_format_to_record(fmt: &LabelFormat) -> Result<LabelFormatRecord, DriverError> {
+    let pfid_u8 = u8::try_from(fmt.pfid).map_err(|_| DriverError::Protocol {
+        code: None,
+        message: format!("XS label format PFID {} out of range (0..=99)", fmt.pfid),
+    })?;
+    let mut rec = match fmt.raw_binary.as_ref() {
+        Some(raw) if raw.len() >= LABEL_FORMAT_LEN => LabelFormatRecord::decode(raw)?,
+        _ => LabelFormatRecord {
+            pfid: pfid_u8,
+            orientation: 0,
+            active: true,
+            width_hundredths_mm: fmt.width_tenths_mm.saturating_mul(10),
+            name: fmt.name.clone(),
+            fields: Vec::new(),
+            raw: vec![0u8; LABEL_FORMAT_LEN],
+        },
+    };
+    rec.pfid = pfid_u8;
+    rec.name = fmt.name.clone();
+
+    if let Ok(def) = serde_json::from_str::<serde_json::Value>(&fmt.definition_json) {
+        if let Some(orientation) = def.get("orientation").and_then(serde_json::Value::as_u64) {
+            rec.orientation = orientation as u8;
+        }
+        if let Some(active) = def.get("active").and_then(serde_json::Value::as_bool) {
+            rec.active = active;
+        }
+        if let Some(width_hmm) = def
+            .get("width_hundredths_mm")
+            .and_then(serde_json::Value::as_u64)
+        {
+            rec.width_hundredths_mm = width_hmm as u16;
+        } else if fmt.width_tenths_mm > 0 {
+            rec.width_hundredths_mm = fmt.width_tenths_mm.saturating_mul(10);
+        }
+        if let Some(fields_val) = def.get("fields")
+            && let Ok(fields) = serde_json::from_value::<Vec<LabelField>>(fields_val.clone())
+        {
+            rec.fields = fields;
+        }
+    } else if fmt.width_tenths_mm > 0 {
+        rec.width_hundredths_mm = fmt.width_tenths_mm.saturating_mul(10);
+    }
+
+    Ok(rec)
 }
 
 #[async_trait]
@@ -859,49 +912,7 @@ impl ScaleDriver for XsDriver {
     }
 
     async fn upsert_label_format(&mut self, fmt: &LabelFormat) -> Result<(), DriverError> {
-        let pfid_u8 = u8::try_from(fmt.pfid).map_err(|_| DriverError::Protocol {
-            code: None,
-            message: format!("XS label format PFID {} out of range (0..=99)", fmt.pfid),
-        })?;
-        let mut rec = match fmt.raw_binary.as_ref() {
-            Some(raw) if raw.len() >= LABEL_FORMAT_LEN => LabelFormatRecord::decode(raw)?,
-            _ => LabelFormatRecord {
-                pfid: pfid_u8,
-                orientation: 0,
-                active: true,
-                width_hundredths_mm: fmt.width_tenths_mm.saturating_mul(10),
-                name: fmt.name.clone(),
-                fields: Vec::new(),
-                raw: vec![0u8; LABEL_FORMAT_LEN],
-            },
-        };
-        rec.pfid = pfid_u8;
-        rec.name = fmt.name.clone();
-
-        if let Ok(def) = serde_json::from_str::<serde_json::Value>(&fmt.definition_json) {
-            if let Some(orientation) = def.get("orientation").and_then(serde_json::Value::as_u64) {
-                rec.orientation = orientation as u8;
-            }
-            if let Some(active) = def.get("active").and_then(serde_json::Value::as_bool) {
-                rec.active = active;
-            }
-            if let Some(width_hmm) = def
-                .get("width_hundredths_mm")
-                .and_then(serde_json::Value::as_u64)
-            {
-                rec.width_hundredths_mm = width_hmm as u16;
-            } else if fmt.width_tenths_mm > 0 {
-                rec.width_hundredths_mm = fmt.width_tenths_mm.saturating_mul(10);
-            }
-            if let Some(fields_val) = def.get("fields")
-                && let Ok(fields) = serde_json::from_value::<Vec<LabelField>>(fields_val.clone())
-            {
-                rec.fields = fields;
-            }
-        } else if fmt.width_tenths_mm > 0 {
-            rec.width_hundredths_mm = fmt.width_tenths_mm.saturating_mul(10);
-        }
-
+        let rec = domain_label_format_to_record(fmt)?;
         Self::write_label_format(self, &rec).await
     }
 
@@ -1148,6 +1159,31 @@ mod tests {
             let (mut socket, _) = listener.accept().await.unwrap();
             let store_id = new_id();
             let mut plus: BTreeMap<PluKey, Vec<u8>> = BTreeMap::new();
+            let mut label_formats: BTreeMap<u8, Vec<u8>> = BTreeMap::new();
+
+            // Pre-populate PFID 1 (active) and PFID 2 (inactive empty) for label format tests
+            let pfid1 = LabelFormatRecord {
+                pfid: 1,
+                orientation: 0,
+                active: true,
+                width_hundredths_mm: 5900,
+                name: "STD 59x40".to_string(),
+                fields: vec![LabelField {
+                    slot: 0,
+                    field_type: 1,
+                    orientation: 0,
+                    style: 49,
+                    x1: 20,
+                    y1: 20,
+                    x2: 500,
+                    y2: 90,
+                    font: 'C',
+                    dsr: 0,
+                }],
+                raw: vec![0u8; LABEL_FORMAT_LEN],
+            };
+            label_formats.insert(1, pfid1.encode().to_vec());
+            label_formats.insert(2, vec![0u8; LABEL_FORMAT_LEN]);
 
             // Pre-populate 5 PLUs (PLU 5 has >500 B payload to exercise lockstep multi-block READ)
             for n in 1..=5u64 {
@@ -1328,6 +1364,19 @@ mod tests {
                         out[33..35].copy_from_slice(b"BM");
                         (STATUS_SUCCESS, out)
                     }
+                    (CMD_LABEL_FORMATS, ACTION_REQUEST) => {
+                        let pfid = payload[0];
+                        if let Some(bytes) = label_formats.get(&pfid) {
+                            (STATUS_SUCCESS, bytes.clone())
+                        } else {
+                            (-1117, vec![])
+                        }
+                    }
+                    (CMD_LABEL_FORMATS, ACTION_UPDATE) => {
+                        let pfid = payload[0];
+                        label_formats.insert(pfid, payload);
+                        (STATUS_SUCCESS, vec![])
+                    }
                     (CMD_GRAND_TOTALS, ACTION_REQUEST) => {
                         let mut grand = vec![0u8; 169];
                         grand[0x09..0x11].copy_from_slice(&50_000i64.to_be_bytes());
@@ -1486,6 +1535,22 @@ mod tests {
         let media = driver.read_media_asset(0).await.unwrap().unwrap();
         assert_eq!(media.name, "logo");
 
+        // Label formats list + edit roundtrip
+        let records = driver.list_label_format_records().await.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].pfid, 1);
+        assert_eq!(records[0].name, "STD 59x40");
+
+        let domain_formats = driver.list_label_formats().await.unwrap();
+        assert_eq!(domain_formats.len(), 1);
+        let mut edited_fmt = domain_formats[0].clone();
+        edited_fmt.name = "EDITADO 59x40".to_string();
+        driver.upsert_label_format(&edited_fmt).await.unwrap();
+
+        let updated_records = driver.list_label_format_records().await.unwrap();
+        assert_eq!(updated_records.len(), 1);
+        assert_eq!(updated_records[0].name, "EDITADO 59x40");
+
         // Sales totals read lifecycle
         let gt = driver.read_grand_totals(0).await.unwrap().unwrap();
         assert_eq!(gt.counter_sales, MoneyCents(50_000));
@@ -1520,5 +1585,126 @@ mod tests {
         assert_eq!(driver.list_plu_totals(0).await.unwrap().len(), 1);
 
         driver.disconnect().await.unwrap();
+    }
+
+    #[test]
+    fn label_format_populated_predicate_checks_all_fields() {
+        let blank = LabelFormatRecord {
+            pfid: 1,
+            orientation: 0,
+            active: false,
+            width_hundredths_mm: 0,
+            name: "   ".to_string(),
+            fields: vec![],
+            raw: vec![0u8; LABEL_FORMAT_LEN],
+        };
+        assert!(!is_populated_label_format(&blank));
+
+        let mut active_only = blank.clone();
+        active_only.active = true;
+        assert!(is_populated_label_format(&active_only));
+
+        let mut named_only = blank.clone();
+        named_only.name = "Formato 1".to_string();
+        assert!(is_populated_label_format(&named_only));
+
+        let mut fields_only = blank;
+        fields_only.fields.push(LabelField {
+            slot: 0,
+            field_type: 1,
+            orientation: 0,
+            style: 49,
+            x1: 10,
+            y1: 10,
+            x2: 200,
+            y2: 80,
+            font: 'C',
+            dsr: 0,
+        });
+        assert!(is_populated_label_format(&fields_only));
+    }
+
+    #[test]
+    fn domain_label_format_to_record_applies_json_and_fallbacks() {
+        let store_id = new_id();
+        let mut raw = vec![0u8; LABEL_FORMAT_LEN];
+        raw[0x03] = 0xAB; // Unknown header byte that must be preserved
+
+        let field = LabelField {
+            slot: 2,
+            field_type: 9,
+            orientation: 1,
+            style: 50,
+            x1: 100,
+            y1: 120,
+            x2: 340,
+            y2: 200,
+            font: 'E',
+            dsr: 3,
+        };
+        let fmt = LabelFormat {
+            id: new_id(),
+            pfid: 7,
+            name: "CARNICERIA".to_string(),
+            width_tenths_mm: 590,
+            height_tenths_mm: 400,
+            definition_json: serde_json::json!({
+                "orientation": 2,
+                "active": false,
+                "width_hundredths_mm": 6150,
+                "fields": [field],
+            })
+            .to_string(),
+            raw_binary: Some(raw),
+            meta: SyncMetadata::new(store_id),
+        };
+
+        let rec = domain_label_format_to_record(&fmt).unwrap();
+        assert_eq!(rec.pfid, 7);
+        assert_eq!(rec.name, "CARNICERIA");
+        assert_eq!(rec.orientation, 2);
+        assert!(!rec.active);
+        assert_eq!(rec.width_hundredths_mm, 6150);
+        assert_eq!(rec.fields.len(), 1);
+        assert_eq!(rec.fields[0].slot, 2);
+        assert_eq!(rec.raw[0x03], 0xAB);
+
+        // Fallback when raw_binary is None and width_hundredths_mm omitted in JSON
+        let fmt_no_width = LabelFormat {
+            id: new_id(),
+            pfid: 8,
+            name: "FALLBACK".to_string(),
+            width_tenths_mm: 590,
+            height_tenths_mm: 0,
+            definition_json: r#"{"orientation": 1}"#.to_string(),
+            raw_binary: None,
+            meta: SyncMetadata::new(store_id),
+        };
+        let rec_no_width = domain_label_format_to_record(&fmt_no_width).unwrap();
+        assert_eq!(rec_no_width.pfid, 8);
+        assert_eq!(rec_no_width.orientation, 1);
+        assert!(rec_no_width.active);
+        assert_eq!(rec_no_width.width_hundredths_mm, 5900);
+        assert_eq!(rec_no_width.raw.len(), LABEL_FORMAT_LEN);
+
+        // Fallback when definition_json is invalid JSON
+        let fmt_bad_json = LabelFormat {
+            id: new_id(),
+            pfid: 9,
+            name: "BADJSON".to_string(),
+            width_tenths_mm: 450,
+            height_tenths_mm: 0,
+            definition_json: "not-json".to_string(),
+            raw_binary: Some(vec![0u8; 10]), // Too short -> blank 898-byte fallback
+            meta: SyncMetadata::new(store_id),
+        };
+        let rec_bad_json = domain_label_format_to_record(&fmt_bad_json).unwrap();
+        assert_eq!(rec_bad_json.width_hundredths_mm, 4500);
+        assert_eq!(rec_bad_json.raw.len(), LABEL_FORMAT_LEN);
+
+        // Out-of-range PFID returns Protocol error
+        let mut fmt_oob = fmt_bad_json;
+        fmt_oob.pfid = 300;
+        assert!(domain_label_format_to_record(&fmt_oob).is_err());
     }
 }

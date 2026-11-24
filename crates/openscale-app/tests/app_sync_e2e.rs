@@ -145,6 +145,16 @@ impl ScaleDriver for MockScaleDriver {
         Ok(())
     }
 
+    async fn upsert_label_format(&mut self, fmt: &LabelFormat) -> Result<(), DriverError> {
+        let mut st = self.state.lock().unwrap();
+        if let Some(existing) = st.label_formats.iter_mut().find(|f| f.pfid == fmt.pfid) {
+            *existing = fmt.clone();
+        } else {
+            st.label_formats.push(fmt.clone());
+        }
+        Ok(())
+    }
+
     async fn list_departments(&mut self) -> Result<Vec<Department>, DriverError> {
         Ok(self.state.lock().unwrap().departments.clone())
     }
@@ -954,6 +964,80 @@ async fn health_monitor_detects_disconnect_and_recovery_transitions() {
             message: Some(_),
         } if id == scale_id
     ));
+
+    app.scales.unregister(scale_id).await;
+}
+
+#[tokio::test]
+async fn list_and_write_scale_label_formats_e2e() {
+    let db = Database::connect_in_memory().await.unwrap();
+    let app = OpenScaleApp::new(db);
+
+    let scale_id = new_id();
+    let fmt1 = LabelFormat {
+        id: new_id(),
+        pfid: 1,
+        name: "ETIQUETA 1".to_string(),
+        width_tenths_mm: 590,
+        height_tenths_mm: 400,
+        definition_json:
+            r#"{"orientation":0,"active":true,"width_hundredths_mm":5900,"fields":[]}"#.to_string(),
+        raw_binary: Some(vec![0u8; 898]),
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    };
+    let fmt2 = LabelFormat {
+        id: new_id(),
+        pfid: 2,
+        name: "ETIQUETA 2".to_string(),
+        width_tenths_mm: 590,
+        height_tenths_mm: 400,
+        definition_json:
+            r#"{"orientation":0,"active":true,"width_hundredths_mm":5900,"fields":[]}"#.to_string(),
+        raw_binary: Some(vec![0u8; 898]),
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    };
+
+    let state = Arc::new(Mutex::new(InMemoryDriverState {
+        label_formats: vec![fmt1.clone(), fmt2],
+        ..Default::default()
+    }));
+
+    app.scales
+        .register_driver(
+            scale_id,
+            Box::new(MockScaleDriver {
+                state: Arc::clone(&state),
+            }),
+        )
+        .await;
+
+    // 1. Read existing formats directly from the scale actor
+    let remote_formats = app.list_scale_label_formats(scale_id).await.unwrap();
+    assert_eq!(remote_formats.len(), 2);
+    assert_eq!(remote_formats[0].pfid, 1);
+    assert_eq!(remote_formats[0].name, "ETIQUETA 1");
+    assert_eq!(remote_formats[1].pfid, 2);
+
+    // 2. Edit PFID 1 and write back to scale + local SQLite
+    let mut edited = fmt1;
+    edited.name = "ETIQUETA 1 EDITADA".to_string();
+    let saved = app
+        .write_scale_label_format(scale_id, edited.clone())
+        .await
+        .unwrap();
+    assert_eq!(saved.pfid, 1);
+    assert_eq!(saved.name, "ETIQUETA 1 EDITADA");
+
+    // Verify scale received the edit
+    let after_write = app.list_scale_label_formats(scale_id).await.unwrap();
+    assert_eq!(after_write.len(), 2);
+    assert_eq!(after_write[0].name, "ETIQUETA 1 EDITADA");
+
+    // Verify local SQLite persisted the edit
+    let local_formats = app.list_label_formats().await.unwrap();
+    assert_eq!(local_formats.len(), 1);
+    assert_eq!(local_formats[0].pfid, 1);
+    assert_eq!(local_formats[0].name, "ETIQUETA 1 EDITADA");
 
     app.scales.unregister(scale_id).await;
 }
