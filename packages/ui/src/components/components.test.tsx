@@ -52,8 +52,14 @@ function ToastTrigger() {
 }
 
 describe("@openscale/ui components", () => {
-  it("renders Button with variants and sizes", () => {
-    render(
+  it("renders Button with variants, sizes, and default type", () => {
+    const { rerender } = render(<Button>Save</Button>);
+    const defaultBtn = screen.getByRole("button", { name: "Save" });
+    expect(defaultBtn).toHaveAttribute("type", "button");
+    expect(defaultBtn.className).toContain("bg-primary");
+    expect(defaultBtn.className).toContain("h-9");
+
+    rerender(
       <Button variant="destructive" size="sm" disabled>
         Delete
       </Button>,
@@ -65,13 +71,22 @@ describe("@openscale/ui components", () => {
   });
 
   it("renders Badge with status variants", () => {
-    render(<Badge variant="success">Online</Badge>);
+    const { rerender } = render(<Badge>Default</Badge>);
+    expect(screen.getByText("Default").className).toContain("bg-secondary");
+
+    rerender(<Badge variant="success">Online</Badge>);
     const badge = screen.getByText("Online");
     expect(badge.className).toContain("text-emerald-700");
+
+    rerender(<Badge variant="warning">Pending</Badge>);
+    expect(screen.getByText("Pending").className).toContain("text-amber-700");
+
+    rerender(<Badge variant="danger">Offline</Badge>);
+    expect(screen.getByText("Offline").className).toContain("text-red-700");
   });
 
   it("renders DataTable rows, loading skeleton, and empty state", () => {
-    const { rerender } = render(
+    const { container, rerender } = render(
       <DataTable
         columns={columns}
         data={[{ plu: 100, description: "POLLO FRESCO" }]}
@@ -80,9 +95,16 @@ describe("@openscale/ui components", () => {
     );
     expect(screen.getByText("100")).toBeInTheDocument();
     expect(screen.getByText("POLLO FRESCO")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "PLU" })).not.toBeInTheDocument();
 
     rerender(<DataTable columns={columns} data={[]} loading loadingRows={2} />);
     expect(screen.queryByText("Empty catalog")).not.toBeInTheDocument();
+    const busyRows = container.querySelectorAll('tr[aria-busy="true"]');
+    expect(busyRows).toHaveLength(2);
+    expect(container.querySelectorAll('tr[aria-busy="true"] td')).toHaveLength(4);
+
+    rerender(<DataTable columns={columns} data={[]} />);
+    expect(screen.getByText("No records found")).toBeInTheDocument();
 
     rerender(
       <DataTable
@@ -110,13 +132,18 @@ describe("@openscale/ui components", () => {
       />,
     );
 
+    const pluHeader = screen.getByRole("columnheader", { name: "PLU" });
+    expect(pluHeader).not.toHaveAttribute("aria-sort");
+
     const pluSortBtn = screen.getByRole("button", { name: "PLU" });
     fireEvent.click(pluSortBtn);
+    expect(pluHeader).toHaveAttribute("aria-sort", "ascending");
     const rowsAsc = screen.getAllByRole("row");
     expect(rowsAsc[1]).toHaveTextContent("100");
     expect(rowsAsc[2]).toHaveTextContent("200");
 
     fireEvent.click(pluSortBtn);
+    expect(pluHeader).toHaveAttribute("aria-sort", "descending");
     const rowsDesc = screen.getAllByRole("row");
     expect(rowsDesc[1]).toHaveTextContent("200");
     expect(rowsDesc[2]).toHaveTextContent("100");
@@ -203,6 +230,14 @@ describe("@openscale/ui components", () => {
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
+
+    fireEvent.mouseDown(dialog);
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    if (dialog.parentElement) {
+      fireEvent.mouseDown(dialog.parentElement);
+    }
+    expect(onClose).toHaveBeenCalledTimes(2);
 
     rerender(
       <ConfirmDialog

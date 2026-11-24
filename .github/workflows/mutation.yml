@@ -38,7 +38,90 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-mutants
-      - run: cargo mutants --workspace --no-shuffle
+      - name: Run cargo-mutants and enforce mutation score threshold (>= 60%)
+        shell: bash
+        env:
+          MIN_MUTATION_SCORE: "60"
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          MUTANTS_ARGS=(--workspace --no-shuffle)
+
+          if [[ "$EVENT_NAME" == "pull_request" || "$EVENT_NAME" == "push" ]]; then
+            if [[ "$EVENT_NAME" == "pull_request" ]]; then
+              git fetch --no-tags --depth=1 origin "$BASE_REF"
+              git diff "FETCH_HEAD...HEAD" -- crates/ > diff.patch
+            elif [[ -n "${BEFORE_SHA:-}" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]] && git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+              git diff "${BEFORE_SHA}..HEAD" -- crates/ > diff.patch
+            elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              git diff HEAD~1..HEAD -- crates/ > diff.patch
+            else
+              : > diff.patch
+            fi
+
+            if [[ ! -s diff.patch ]]; then
+              echo "No Rust crate changes in diff; skipping incremental mutation testing."
+              exit 0
+            fi
+
+            echo "Running incremental cargo-mutants against diff.patch..."
+            MUTANTS_ARGS+=(--in-diff diff.patch)
+          else
+            echo "Running full workspace cargo-mutants..."
+          fi
+
+          set +e
+          cargo mutants "${MUTANTS_ARGS[@]}"
+          MUTANTS_EXIT=$?
+          set -e
+
+          # Exit codes: 0 = all caught, 2 = missed mutants, 3 = timeouts.
+          # Fail immediately on any other exit code (build/baseline/config error).
+          if [[ "$MUTANTS_EXIT" -ne 0 && "$MUTANTS_EXIT" -ne 2 && "$MUTANTS_EXIT" -ne 3 ]]; then
+            echo "cargo-mutants failed with exit code $MUTANTS_EXIT"
+            exit "$MUTANTS_EXIT"
+          fi
+
+          python3 - <<'PY'
+          import json, os, sys
+
+          min_score = float(os.environ["MIN_MUTATION_SCORE"])
+          outcomes_path = "mutants.out/outcomes.json"
+          if not os.path.exists(outcomes_path):
+              print("No mutants.out/outcomes.json found; assuming 0 mutants in scope.")
+              sys.exit(0)
+
+          with open(outcomes_path, "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          caught = int(data.get("caught", 0))
+          timeout = int(data.get("timeout", 0))
+          missed = int(data.get("missed", 0))
+          unviable = int(data.get("unviable", 0))
+          viable = caught + timeout + missed
+
+          if viable == 0:
+              print(f"No viable mutants tested (unviable={unviable}). Passing.")
+              sys.exit(0)
+
+          score = ((caught + timeout) / viable) * 100.0
+          print(
+              f"Rust mutation score: {score:.2f}% "
+              f"(caught={caught}, timeout={timeout}, missed={missed}, unviable={unviable}, "
+              f"threshold={min_score:.2f}%)"
+          )
+          if score < min_score:
+              print(
+                  f"::error::Rust mutation score {score:.2f}% is below threshold {min_score:.2f}%",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          PY

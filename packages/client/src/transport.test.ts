@@ -124,8 +124,30 @@ describe("HttpWsTransport", () => {
     );
 
     expect(await transport.listPlus()).toEqual([samplePlu]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "http://localhost:8080/api/v1/plus",
+      expect.objectContaining({
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
     expect(await transport.getPlu({ did: 1, plu: 100 })).toEqual(samplePlu);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "http://localhost:8080/api/v1/plus/1/100",
+      expect.objectContaining({
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
     expect(await transport.upsertPlu(samplePlu)).toEqual(samplePlu);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "http://localhost:8080/api/v1/plus/1/100",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify(samplePlu) }),
+    );
+
     expect(await transport.deletePlu({ did: 1, plu: 100 })).toBe(true);
     expect(fetchMock).toHaveBeenNthCalledWith(
       7,
@@ -134,7 +156,7 @@ describe("HttpWsTransport", () => {
     );
   });
 
-  it("calls importFromScale and syncScale endpoints", async () => {
+  it("calls importFromScale, previewImportFromScale, applyScaleImport, and syncScale endpoints", async () => {
     const report = {
       scale_id: "scale-1",
       mode: "delta" as const,
@@ -143,15 +165,89 @@ describe("HttpWsTransport", () => {
       skipped_unchanged: 8,
       failed_plus: 0,
     };
+    const selection = {
+      plus: true,
+      departments: true,
+      tares: false,
+      tax_rates: false,
+      stored_texts: false,
+      barcode_formats: false,
+      label_formats: false,
+    };
+    const preview = {
+      scale_id: "scale-1",
+      scale_name: "XS 01",
+      previewed_at: "2026-11-23T22:00:00Z",
+      plus: [],
+      departments: [],
+      tares: [],
+      tax_rates: [],
+      stored_texts: [],
+      barcode_formats: [],
+      label_formats: [],
+      warnings: [],
+    };
+    const applyRequest = {
+      scale_id: "scale-1",
+      plus: [],
+      departments: [],
+      tares: [],
+      tax_rates: [],
+      stored_texts: [],
+      barcode_formats: [],
+      label_formats: [],
+      kept_local_conflicts: 0,
+      skipped_unchanged: 0,
+    };
+    const applyResult = {
+      scale_id: "scale-1",
+      imported_plus: 0,
+      imported_departments: 0,
+      imported_tares: 0,
+      imported_tax_rates: 0,
+      imported_stored_texts: 0,
+      imported_barcode_formats: 0,
+      imported_label_formats: 0,
+      total_imported: 0,
+      kept_local_conflicts: 0,
+      skipped_unchanged: 0,
+    };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJsonResponse(740))
+      .mockResolvedValueOnce(mockJsonResponse(preview))
+      .mockResolvedValueOnce(mockJsonResponse(applyResult))
       .mockResolvedValueOnce(mockJsonResponse(report));
     vi.stubGlobal("fetch", fetchMock);
 
     const transport = new HttpWsTransport({ baseUrl: "http://localhost:8080" });
     expect(await transport.importFromScale("scale-1")).toBe(740);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8080/api/v1/scales/scale-1/import",
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    expect(await transport.previewImportFromScale("scale-1", selection)).toEqual(preview);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8080/api/v1/scales/scale-1/import/preview",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(selection) }),
+    );
+
+    expect(await transport.applyScaleImport(applyRequest)).toEqual(applyResult);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://localhost:8080/api/v1/scales/scale-1/import/apply",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(applyRequest) }),
+    );
+
     expect(await transport.syncScale("scale-1", "delta")).toEqual(report);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "http://localhost:8080/api/v1/scales/scale-1/sync",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ mode: "delta" }) }),
+    );
   });
 
   it("calls checkScaleHealth and checkAllScalesHealth endpoints", async () => {
@@ -231,5 +327,10 @@ describe("HttpWsTransport", () => {
 
     unsubscribe();
     expect(closeSpy).toHaveBeenCalledTimes(1);
+
+    const wsTransport = new HttpWsTransport({ baseUrl: "wss://http-gateway.local" });
+    const unsub2 = wsTransport.subscribe(() => {});
+    expect(constructedUrl).toBe("wss://http-gateway.local/api/v1/ws");
+    unsub2();
   });
 });

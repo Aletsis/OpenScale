@@ -10,10 +10,17 @@ describe("@openscale/i18n", () => {
     );
   });
 
-  it("initializes i18next and switches languages between en and es", async () => {
-    const instance = initOpenScaleI18n("en");
+  it("initializes i18next with defaults and switches languages between en and es", async () => {
+    const instance = initOpenScaleI18n();
     expect(instance.isInitialized).toBe(true);
+    expect(instance.language).toBe("en");
+    expect(instance.options.fallbackLng).toEqual(["en"]);
+    expect(instance.options.interpolation?.escapeValue).toBe(false);
     expect(instance.t("nav.catalog")).toBe("PLU Catalog");
+
+    // Calling initOpenScaleI18n again after initialization should not re-initialize or change language
+    initOpenScaleI18n("es");
+    expect(instance.language).toBe("en");
 
     await instance.changeLanguage("es");
     expect(instance.t("nav.catalog")).toBe("Catálogo PLU");

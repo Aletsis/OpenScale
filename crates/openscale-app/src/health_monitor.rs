@@ -49,7 +49,12 @@ pub async fn check_scale_health(
     match handle.health_check().await {
         Ok(()) => {
             app.scale_repo()
-                .update_status(app.store_id, scale_id, ScaleStatus::Online, Some(checked_at))
+                .update_status(
+                    app.store_id,
+                    scale_id,
+                    ScaleStatus::Online,
+                    Some(checked_at),
+                )
                 .await?;
 
             if previous_status != ScaleStatus::Online {

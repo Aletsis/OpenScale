@@ -5,6 +5,7 @@
   "testRunner": "vitest",
   "concurrency": 2,
   "coverageAnalysis": "perTest",
+  "ignorePatterns": ["mutants.out", "target", "apps/desktop/src-tauri/target"],
   "mutate": [
     "packages/client/src/transport.ts",
     "packages/i18n/src/index.ts",

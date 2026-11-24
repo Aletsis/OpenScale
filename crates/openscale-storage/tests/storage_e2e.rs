@@ -113,7 +113,26 @@ async fn sqlite_wal_persistence_lifecycle_e2e() {
         assert_eq!(plus[0].meta.sync_version, 2);
 
         assert!(
+            scale_repo
+                .update_status(DEFAULT_LOCAL_STORE_ID, scale_id, ScaleStatus::Offline, None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !scale_repo
+                .update_status(DEFAULT_LOCAL_STORE_ID, new_id(), ScaleStatus::Offline, None)
+                .await
+                .unwrap()
+        );
+
+        assert!(
             plu_repo
+                .soft_delete(DEFAULT_LOCAL_STORE_ID, key)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !plu_repo
                 .soft_delete(DEFAULT_LOCAL_STORE_ID, key)
                 .await
                 .unwrap()
