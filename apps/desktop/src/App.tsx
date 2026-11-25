@@ -1041,8 +1041,8 @@ export function App() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
-      <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card p-4">
+    <div className="flex h-screen overflow-hidden bg-background text-foreground">
+      <aside className="flex h-full w-64 shrink-0 flex-col border-r border-border bg-card p-4">
         <div className="mb-6 flex items-center gap-3 px-1">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-xs">
             <ScaleIcon className="h-5 w-5" />
@@ -1055,7 +1055,7 @@ export function App() {
           </div>
         </div>
 
-        <nav className="flex flex-col gap-1">
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto pr-1">
           <Button
             variant={activeTab === "scales" ? "default" : "ghost"}
             className="justify-between"
