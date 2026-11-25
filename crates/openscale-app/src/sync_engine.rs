@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
-use openscale_domain::PluKey;
+use openscale_domain::{BranchCatalogMode, Plu, PluKey};
 use openscale_storage::Database;
-use openscale_storage::repos::PluRepository;
+use openscale_storage::repos::{BranchRepository, PluRepository, ScaleRepository};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
@@ -70,6 +70,44 @@ impl SyncEngine {
         Ok(imported)
     }
 
+    /// Resolves the effective PLU catalog for a scale, applying its branch's `catalog_mode`
+    /// while keeping global Master Catalog prices identical across all branches.
+    pub async fn effective_catalog_for_scale(
+        &self,
+        store_id: Uuid,
+        scale_id: Uuid,
+    ) -> Result<Vec<Plu>, AppError> {
+        let plu_repo = PluRepository::new(self.db.pool().clone());
+        let all_plus = plu_repo.list_active(store_id).await?;
+
+        let scale_repo = ScaleRepository::new(self.db.pool().clone());
+        let Some(scale) = scale_repo.get_by_id(store_id, scale_id).await? else {
+            return Ok(all_plus);
+        };
+        let Some(branch_id) = scale.branch_id else {
+            return Ok(all_plus);
+        };
+
+        let branch_repo = BranchRepository::new(self.db.pool().clone());
+        let Some(branch) = branch_repo.get_by_id(store_id, branch_id).await? else {
+            return Ok(all_plus);
+        };
+
+        if branch.catalog_mode == BranchCatalogMode::All {
+            return Ok(all_plus);
+        }
+
+        let allowed: HashSet<PluKey> = branch_repo
+            .list_plu_keys(branch_id)
+            .await?
+            .into_iter()
+            .collect();
+        Ok(all_plus
+            .into_iter()
+            .filter(|plu| allowed.contains(&plu.key))
+            .collect())
+    }
+
     /// Synchronizes the local SQLite Master Catalog to a target scale using Delta or Full mode.
     pub async fn sync_to_scale(
         &self,
@@ -78,8 +116,7 @@ impl SyncEngine {
         mode: SyncMode,
     ) -> Result<SyncReport, AppError> {
         let handle = self.scales.get(scale_id).await?;
-        let plu_repo = PluRepository::new(self.db.pool().clone());
-        let catalog = plu_repo.list_active(store_id).await?;
+        let catalog = self.effective_catalog_for_scale(store_id, scale_id).await?;
         let existing_checksums = self.load_checksums(scale_id).await?;
 
         let mut sent_plus = 0usize;

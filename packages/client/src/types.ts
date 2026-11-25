@@ -27,8 +27,21 @@ export interface SyncMetadata {
   deleted_at: string | null;
 }
 
+export type BranchCatalogMode = "all" | "selected";
+
+export interface Branch {
+  id: string;
+  code: string;
+  name: string;
+  address: string | null;
+  notes: string | null;
+  catalog_mode: BranchCatalogMode;
+  meta: SyncMetadata;
+}
+
 export interface Scale {
   id: string;
+  branch_id?: string | null;
   group_id: string | null;
   name: string;
   family: ScaleFamily;

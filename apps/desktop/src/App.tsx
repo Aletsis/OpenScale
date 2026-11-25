@@ -1,6 +1,8 @@
 import {
+  type Branch,
   type DiscoveredScale,
   type Plu,
+  type PluKey,
   type Scale,
   type ScaleImportResult,
   type SyncMode,
@@ -24,6 +26,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import {
   Activity,
   BarChart3,
+  Building2,
   Check,
   Database,
   Download,
@@ -50,11 +53,13 @@ import {
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { BranchesDialog } from "./components/BranchesDialog.js";
 import { LabelDesignerView } from "./components/LabelDesignerView.js";
 import { LabelFormatsView } from "./components/LabelFormatsView.js";
 import { MasterTablesView } from "./components/MasterTablesView.js";
 import { PluFormDialog } from "./components/PluFormDialog.js";
 import { SalesReportsView } from "./components/SalesReportsView.js";
+import { ScaleEditDialog } from "./components/ScaleEditDialog.js";
 import { ScaleImportDialog } from "./components/ScaleImportDialog.js";
 import { ServiceConsoleView } from "./components/ServiceConsoleView.js";
 
@@ -143,6 +148,10 @@ export function App() {
   const [importDialogFromSave, setImportDialogFromSave] = useState(false);
   const [pendingDeleteScale, setPendingDeleteScale] = useState<Scale | null>(null);
   const [isDeletingScale, setIsDeletingScale] = useState(false);
+  const [showBranchesDialog, setShowBranchesDialog] = useState(false);
+  const [editingScale, setEditingScale] = useState<Scale | null>(null);
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>("all");
+  const [catalogBranchId, setCatalogBranchId] = useState<string>("all");
 
   // Catalog state
   const [search, setSearch] = useState("");
@@ -161,6 +170,11 @@ export function App() {
   const [inlinePriceValue, setInlinePriceValue] = useState("");
   const [isSavingInlinePrice, setIsSavingInlinePrice] = useState(false);
 
+  const branchesQuery = useQuery({
+    queryKey: ["branches"],
+    queryFn: () => (transport.listBranches ? transport.listBranches() : Promise.resolve([])),
+  });
+
   const scalesQuery = useQuery({
     queryKey: ["scales"],
     queryFn: () => transport.listScales(),
@@ -171,8 +185,46 @@ export function App() {
     queryFn: () => transport.listPlus(),
   });
 
+  const branches = branchesQuery.data ?? [];
   const scales = scalesQuery.data ?? [];
   const allPlus = plusQuery.data ?? [];
+
+  const branchById = useMemo(
+    () => new Map(branches.map((branch) => [branch.id, branch])),
+    [branches],
+  );
+
+  const selectedCatalogBranch = useMemo(
+    () => (catalogBranchId === "all" ? null : (branchById.get(catalogBranchId) ?? null)),
+    [branchById, catalogBranchId],
+  );
+
+  const branchPluKeysQuery = useQuery({
+    queryKey: ["branch_plu_keys", catalogBranchId],
+    enabled: selectedCatalogBranch?.catalog_mode === "selected" && Boolean(transport.listBranchPluKeys),
+    queryFn: () =>
+      transport.listBranchPluKeys
+        ? transport.listBranchPluKeys(catalogBranchId)
+        : Promise.resolve([]),
+  });
+
+  const branchPluKeySet = useMemo(() => {
+    const set = new Set<string>();
+    for (const k of branchPluKeysQuery.data ?? []) {
+      set.add(`${k.did}:${k.plu}`);
+    }
+    return set;
+  }, [branchPluKeysQuery.data]);
+
+  const filteredScales = useMemo(() => {
+    if (selectedBranchFilter === "all") {
+      return scales;
+    }
+    if (selectedBranchFilter === "unassigned") {
+      return scales.filter((s) => !s.branch_id);
+    }
+    return scales.filter((s) => s.branch_id === selectedBranchFilter);
+  }, [scales, selectedBranchFilter]);
 
   const unregisteredDiscovered = useMemo(
     () => discovered.filter((item) => !isScaleRegistered(item, scales)),
@@ -439,6 +491,10 @@ export function App() {
       const now = new Date().toISOString();
       const scale: Scale = {
         id: crypto.randomUUID(),
+        branch_id:
+          selectedBranchFilter !== "all" && selectedBranchFilter !== "unassigned"
+            ? selectedBranchFilter
+            : (branches[0]?.id ?? null),
         group_id: null,
         name: item.model ?? item.ip_address,
         family: item.family,
@@ -471,6 +527,105 @@ export function App() {
         variant: "error",
         message: t("notifications.error", { message: String(err) }),
       });
+    }
+  };
+
+  const handleSaveBranch = async (branch: Branch) => {
+    if (!transport.upsertBranch) {
+      return;
+    }
+    try {
+      await transport.upsertBranch(branch);
+      await queryClient.invalidateQueries({ queryKey: ["branches"] });
+      toast({ variant: "success", message: `Sucursal "${branch.name}" guardada.` });
+    } catch (err) {
+      toast({ variant: "error", message: t("notifications.error", { message: String(err) }) });
+    }
+  };
+
+  const handleDeleteBranch = async (branch: Branch) => {
+    if (!transport.deleteBranch) {
+      return;
+    }
+    try {
+      await transport.deleteBranch(branch.id);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["branches"] }),
+        queryClient.invalidateQueries({ queryKey: ["scales"] }),
+      ]);
+      if (selectedBranchFilter === branch.id) {
+        setSelectedBranchFilter("all");
+      }
+      if (catalogBranchId === branch.id) {
+        setCatalogBranchId("all");
+      }
+      toast({ variant: "success", message: `Sucursal "${branch.name}" eliminada.` });
+    } catch (err) {
+      toast({ variant: "error", message: t("notifications.error", { message: String(err) }) });
+    }
+  };
+
+  const handleUpdateScale = async (updated: Scale) => {
+    try {
+      await transport.upsertScale(updated);
+      await queryClient.invalidateQueries({ queryKey: ["scales"] });
+      toast({
+        variant: "success",
+        message: t("notifications.scaleUpdated", { name: updated.name, ip: updated.ip_address }),
+      });
+    } catch (err) {
+      toast({ variant: "error", message: t("notifications.error", { message: String(err) }) });
+    }
+  };
+
+  const handleToggleBranchPlu = async (plu: Plu) => {
+    if (!selectedCatalogBranch || !transport.setBranchPluKeys) {
+      return;
+    }
+    const keyStr = `${plu.key.did}:${plu.key.plu}`;
+    const current = branchPluKeysQuery.data ?? [];
+    const next: PluKey[] = branchPluKeySet.has(keyStr)
+      ? current.filter((k) => `${k.did}:${k.plu}` !== keyStr)
+      : [...current, plu.key];
+    try {
+      await transport.setBranchPluKeys(selectedCatalogBranch.id, next);
+      await queryClient.invalidateQueries({ queryKey: ["branch_plu_keys", selectedCatalogBranch.id] });
+    } catch (err) {
+      toast({ variant: "error", message: t("notifications.error", { message: String(err) }) });
+    }
+  };
+
+  const handleAssignVisibleToBranch = async (assign: boolean) => {
+    if (!selectedCatalogBranch || !transport.setBranchPluKeys) {
+      return;
+    }
+    const visibleMap = new Map<string, PluKey>();
+    for (const p of filteredPlus) {
+      visibleMap.set(`${p.key.did}:${p.key.plu}`, p.key);
+    }
+    const merged = new Map<string, PluKey>();
+    for (const k of branchPluKeysQuery.data ?? []) {
+      merged.set(`${k.did}:${k.plu}`, k);
+    }
+    for (const [keyStr, key] of visibleMap) {
+      if (assign) {
+        merged.set(keyStr, key);
+      } else {
+        merged.delete(keyStr);
+      }
+    }
+    try {
+      const next = Array.from(merged.values());
+      await transport.setBranchPluKeys(selectedCatalogBranch.id, next);
+      await queryClient.invalidateQueries({ queryKey: ["branch_plu_keys", selectedCatalogBranch.id] });
+      toast({
+        variant: "success",
+        message: assign
+          ? `Se asignaron ${visibleMap.size} PLU(s) a ${selectedCatalogBranch.name}.`
+          : `Se quitaron ${visibleMap.size} PLU(s) de ${selectedCatalogBranch.name}.`,
+      });
+    } catch (err) {
+      toast({ variant: "error", message: t("notifications.error", { message: String(err) }) });
     }
   };
 
@@ -748,6 +903,22 @@ export function App() {
       cell: ({ getValue }) => <span className="font-medium">{getValue<string>()}</span>,
     },
     {
+      id: "branch",
+      header: "Sucursal",
+      accessorFn: (row) => (row.branch_id ? (branchById.get(row.branch_id)?.name ?? "—") : "—"),
+      cell: ({ row }) => {
+        const branch = row.original.branch_id ? branchById.get(row.original.branch_id) : null;
+        return branch ? (
+          <Badge variant="default" className="gap-1">
+            <Building2 className="h-3 w-3" />
+            {branch.name}
+          </Badge>
+        ) : (
+          <span className="text-xs text-muted-foreground">Sin asignar</span>
+        );
+      },
+    },
+    {
       accessorKey: "ip_address",
       header: t("scales.columns.ip"),
       cell: ({ getValue }) => (
@@ -857,6 +1028,16 @@ export function App() {
               size="icon"
               variant="ghost"
               disabled={syncScaleMutation.isPending}
+              onClick={() => setEditingScale(row.original)}
+              aria-label={t("common.edit")}
+              title="Editar báscula / sucursal"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              disabled={syncScaleMutation.isPending}
               onClick={() => setPendingDeleteScale(row.original)}
               aria-label={t("common.delete")}
               title={t("common.delete")}
@@ -870,6 +1051,28 @@ export function App() {
   ];
 
   const pluColumns: ColumnDef<Plu>[] = [
+    ...(selectedCatalogBranch?.catalog_mode === "selected"
+      ? [
+          {
+            id: "branchAssigned",
+            header: selectedCatalogBranch.code,
+            enableSorting: false,
+            cell: ({ row }: { row: { original: Plu } }) => {
+              const plu = row.original;
+              const checked = branchPluKeySet.has(`${plu.key.did}:${plu.key.plu}`);
+              return (
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => void handleToggleBranchPlu(plu)}
+                  aria-label={`Asignar PLU ${plu.key.plu} a ${selectedCatalogBranch.name}`}
+                  className="h-4 w-4 cursor-pointer accent-primary"
+                />
+              );
+            },
+          } satisfies ColumnDef<Plu>,
+        ]
+      : []),
     {
       id: "did",
       header: t("catalog.columns.did"),
@@ -1243,6 +1446,10 @@ export function App() {
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="outline" onClick={() => setShowBranchesDialog(true)}>
+                    <Building2 className="h-4 w-4" />
+                    Sucursales ({branches.length})
+                  </Button>
                   <Button
                     variant="outline"
                     onClick={() => checkHealthMutation.mutate()}
@@ -1326,12 +1533,36 @@ export function App() {
               )}
 
               <section className="space-y-2.5">
-                <h3 className="text-sm font-semibold text-muted-foreground">
-                  {t("scales.registered")}
-                </h3>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-muted-foreground">
+                    {t("scales.registered")}
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                    <select
+                      aria-label="Filtrar por sucursal"
+                      value={selectedBranchFilter}
+                      onChange={(ev) => setSelectedBranchFilter(ev.target.value)}
+                      className="rounded-md border border-border bg-card px-2.5 py-1 text-xs text-foreground"
+                    >
+                      <option value="all">Todas las sucursales ({scales.length})</option>
+                      {branches.map((branch) => {
+                        const count = scales.filter((s) => s.branch_id === branch.id).length;
+                        return (
+                          <option key={branch.id} value={branch.id}>
+                            [{branch.code}] {branch.name} ({count})
+                          </option>
+                        );
+                      })}
+                      <option value="unassigned">
+                        Sin asignar ({scales.filter((s) => !s.branch_id).length})
+                      </option>
+                    </select>
+                  </div>
+                </div>
                 <DataTable
                   columns={scaleColumns}
-                  data={scales}
+                  data={filteredScales}
                   loading={scalesQuery.isLoading}
                   emptyMessage={t("common.noData")}
                   emptyDescription={t("scales.emptyHint")}
@@ -1399,37 +1630,83 @@ export function App() {
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="relative w-full max-w-md">
-                  <Search
-                    className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                  <input
-                    type="search"
-                    value={search}
-                    onChange={(ev) => setSearch(ev.target.value)}
-                    placeholder={t("catalog.searchPlaceholder")}
-                    className="w-full rounded-md border border-border bg-card py-1.5 pr-8 pl-9 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  />
-                  {search && (
-                    <button
-                      type="button"
-                      onClick={() => setSearch("")}
-                      aria-label={t("common.clearSearch")}
-                      className="absolute top-1/2 right-2 inline-flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="relative w-72 max-w-full">
+                    <Search
+                      className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                    <input
+                      type="search"
+                      value={search}
+                      onChange={(ev) => setSearch(ev.target.value)}
+                      placeholder={t("catalog.searchPlaceholder")}
+                      className="w-full rounded-md border border-border bg-card py-1.5 pr-8 pl-9 text-sm text-foreground transition-colors placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    />
+                    {search && (
+                      <button
+                        type="button"
+                        onClick={() => setSearch("")}
+                        aria-label={t("common.clearSearch")}
+                        className="absolute top-1/2 right-2 inline-flex h-5 w-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {branches.length > 0 && (
+                    <div className="flex items-center gap-1.5">
+                      <Building2 className="h-4 w-4 text-muted-foreground" />
+                      <select
+                        aria-label="Catálogo por sucursal"
+                        value={catalogBranchId}
+                        onChange={(ev) => setCatalogBranchId(ev.target.value)}
+                        className="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-foreground"
+                      >
+                        <option value="all">Catálogo Maestro (Precios Globales)</option>
+                        {branches.map((branch) => (
+                          <option key={branch.id} value={branch.id}>
+                            [{branch.code}] {branch.name} —{" "}
+                            {branch.catalog_mode === "selected" ? "Catálogo propio" : "Todos"}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   )}
                 </div>
-                <Badge variant="default" className="tabular-nums">
-                  {search.trim()
-                    ? t("catalog.filteredCount", {
-                        shown: filteredPlus.length,
-                        total: allPlus.length,
-                      })
-                    : t("catalog.pluCount", { count: allPlus.length })}
-                </Badge>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {selectedCatalogBranch?.catalog_mode === "selected" && (
+                    <>
+                      <Badge variant="warning" className="tabular-nums">
+                        {branchPluKeySet.size} asignados a {selectedCatalogBranch.code}
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleAssignVisibleToBranch(true)}
+                      >
+                        Asignar visibles
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void handleAssignVisibleToBranch(false)}
+                      >
+                        Quitar visibles
+                      </Button>
+                    </>
+                  )}
+                  <Badge variant="default" className="tabular-nums">
+                    {search.trim()
+                      ? t("catalog.filteredCount", {
+                          shown: filteredPlus.length,
+                          total: allPlus.length,
+                        })
+                      : t("catalog.pluCount", { count: allPlus.length })}
+                  </Badge>
+                </div>
               </div>
 
               <DataTable
@@ -1479,6 +1756,23 @@ export function App() {
           )}
         </div>
       </main>
+
+      <BranchesDialog
+        open={showBranchesDialog}
+        branches={branches}
+        storeId={DEFAULT_STORE_ID}
+        onClose={() => setShowBranchesDialog(false)}
+        onSave={handleSaveBranch}
+        onDelete={handleDeleteBranch}
+      />
+
+      <ScaleEditDialog
+        open={editingScale !== null}
+        scale={editingScale}
+        branches={branches}
+        onClose={() => setEditingScale(null)}
+        onSave={handleUpdateScale}
+      />
 
       <PluFormDialog
         open={showForm}

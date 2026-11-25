@@ -7,8 +7,9 @@ pub mod types;
 pub use auth::{ApiKey, AuthMode, Permission, Role, User};
 pub use error::DomainError;
 pub use models::{
-    AuditLog, BarcodeFormat, Department, LabelFormat, MediaAsset, Plu, SalesSnapshot, Scale,
-    ScaleGroup, Store, StoredText, SyncJob, SyncJobItem, SyncJobStatus, Tare, TaxRate,
+    AuditLog, BarcodeFormat, Branch, BranchCatalogMode, Department, LabelFormat, MediaAsset, Plu,
+    SalesSnapshot, Scale, ScaleGroup, Store, StoredText, SyncJob, SyncJobItem, SyncJobStatus, Tare,
+    TaxRate,
 };
 pub use sales::{
     DeptTotals, GrandTotals, GroupTotals, MachTotals, OperatorTotals, PluTotals, ScaleSalesReport,

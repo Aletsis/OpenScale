@@ -1,4 +1,5 @@
 import type {
+  Branch,
   DiscoveredScale,
   ImportSelection,
   OpenScaleTransport,
@@ -21,6 +22,26 @@ import { listen } from "@tauri-apps/api/event";
  * Phase 1 Desktop Standalone transport powered by Tauri v2 IPC commands.
  */
 export class TauriIpcTransport implements OpenScaleTransport {
+  listBranches(): Promise<Branch[]> {
+    return invoke<Branch[]>("list_branches");
+  }
+
+  upsertBranch(branch: Branch): Promise<Branch> {
+    return invoke<Branch>("upsert_branch", { branch });
+  }
+
+  deleteBranch(branchId: string): Promise<boolean> {
+    return invoke<boolean>("delete_branch", { branchId });
+  }
+
+  listBranchPluKeys(branchId: string): Promise<PluKey[]> {
+    return invoke<PluKey[]>("list_branch_plu_keys", { branchId });
+  }
+
+  setBranchPluKeys(branchId: string, keys: PluKey[]): Promise<number> {
+    return invoke<number>("set_branch_plu_keys", { branchId, keys });
+  }
+
   discoverScales(): Promise<DiscoveredScale[]> {
     return invoke<DiscoveredScale[]>("discover_scales");
   }

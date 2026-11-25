@@ -265,6 +265,7 @@ async fn scale_manager_and_delta_sync_lifecycle() {
     let scale_id = new_id();
     let scale = Scale {
         id: scale_id,
+        branch_id: None,
         group_id: None,
         name: "Carnicería XS".to_string(),
         family: ScaleFamily::AveryBerkelXs,
@@ -365,6 +366,7 @@ async fn master_tables_sync_and_sales_snapshots_e2e() {
     let scale_id = new_id();
     let scale = Scale {
         id: scale_id,
+        branch_id: None,
         group_id: None,
         name: "Báscula Ventas".to_string(),
         family: ScaleFamily::AveryBerkelXs,
@@ -473,6 +475,7 @@ async fn selective_import_with_conflict_resolution_e2e() {
     let scale_id = new_id();
     let scale = Scale {
         id: scale_id,
+        branch_id: None,
         group_id: None,
         name: "XS Import Test".to_string(),
         family: ScaleFamily::AveryBerkelXs,
@@ -722,6 +725,7 @@ async fn delete_scale_soft_deletes_and_unregisters_actor() {
     let scale_id = new_id();
     let scale = Scale {
         id: scale_id,
+        branch_id: None,
         group_id: None,
         name: "Carnicería 02".to_string(),
         family: ScaleFamily::AveryBerkelXs,
@@ -850,6 +854,7 @@ async fn health_monitor_detects_disconnect_and_recovery_transitions() {
     let scale_id = new_id();
     let scale = Scale {
         id: scale_id,
+        branch_id: None,
         group_id: None,
         name: "Báscula Monitor".to_string(),
         family: ScaleFamily::AveryBerkelXs,

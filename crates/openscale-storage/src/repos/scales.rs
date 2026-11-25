@@ -25,11 +25,12 @@ impl ScaleRepository {
         sqlx::query(
             r#"
             INSERT INTO scales (
-                id, store_id, group_id, name, family, ip_address, data_port, service_port,
+                id, store_id, branch_id, group_id, name, family, ip_address, data_port, service_port,
                 serial_number, model, firmware_version, mac_address, status, last_seen_at,
                 sync_version, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                branch_id = excluded.branch_id,
                 group_id = excluded.group_id,
                 name = excluded.name,
                 family = excluded.family,
@@ -49,6 +50,7 @@ impl ScaleRepository {
         )
         .bind(scale.id.to_string())
         .bind(scale.meta.store_id.to_string())
+        .bind(scale.branch_id.map(|id| id.to_string()))
         .bind(scale.group_id.map(|id| id.to_string()))
         .bind(&scale.name)
         .bind(family)
@@ -74,7 +76,7 @@ impl ScaleRepository {
         let rows = sqlx::query(
             r#"
             SELECT
-                id, store_id, group_id, name, family, ip_address, data_port, service_port,
+                id, store_id, branch_id, group_id, name, family, ip_address, data_port, service_port,
                 serial_number, model, firmware_version, mac_address, status, last_seen_at,
                 sync_version, updated_at, deleted_at
             FROM scales
@@ -97,7 +99,7 @@ impl ScaleRepository {
         let row = sqlx::query(
             r#"
             SELECT
-                id, store_id, group_id, name, family, ip_address, data_port, service_port,
+                id, store_id, branch_id, group_id, name, family, ip_address, data_port, service_port,
                 serial_number, model, firmware_version, mac_address, status, last_seen_at,
                 sync_version, updated_at, deleted_at
             FROM scales
@@ -207,6 +209,7 @@ fn str_to_status(value: &str) -> Result<ScaleStatus, StorageError> {
 fn row_to_scale(row: sqlx::sqlite::SqliteRow) -> Result<Scale, StorageError> {
     let id_str: String = row.try_get("id")?;
     let store_id_str: String = row.try_get("store_id")?;
+    let branch_id_str: Option<String> = row.try_get("branch_id")?;
     let group_id_str: Option<String> = row.try_get("group_id")?;
     let family_str: String = row.try_get("family")?;
     let status_str: String = row.try_get("status")?;
@@ -218,6 +221,7 @@ fn row_to_scale(row: sqlx::sqlite::SqliteRow) -> Result<Scale, StorageError> {
 
     Ok(Scale {
         id: Uuid::parse_str(&id_str)?,
+        branch_id: branch_id_str.as_deref().map(Uuid::parse_str).transpose()?,
         group_id: group_id_str.as_deref().map(Uuid::parse_str).transpose()?,
         name: row.try_get("name")?,
         family: str_to_family(&family_str)?,
@@ -258,6 +262,7 @@ mod tests {
 
         let scale = Scale {
             id: new_id(),
+            branch_id: None,
             group_id: None,
             name: "Carnicería 01".to_string(),
             family: ScaleFamily::AveryBerkelXs,
@@ -306,6 +311,7 @@ mod tests {
         let initial_seen = Utc::now() - chrono::TimeDelta::minutes(5);
         let scale = Scale {
             id: new_id(),
+            branch_id: None,
             group_id: None,
             name: "Carnicería 01".to_string(),
             family: ScaleFamily::AveryBerkelXs,

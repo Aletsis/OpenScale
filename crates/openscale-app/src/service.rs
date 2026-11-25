@@ -3,13 +3,13 @@ use std::time::Duration;
 use chrono::Utc;
 use openscale_domain::types::new_id;
 use openscale_domain::{
-    BarcodeFormat, Department, LabelFormat, Plu, PluKey, SalesSnapshot, Scale, ScaleSalesReport,
-    StoredText, SyncMetadata, Tare, TaxRate,
+    BarcodeFormat, Branch, Department, LabelFormat, Plu, PluKey, SalesSnapshot, Scale,
+    ScaleSalesReport, StoredText, SyncMetadata, Tare, TaxRate,
 };
 use openscale_driver::DiscoveredScale;
 use openscale_storage::repos::{
-    AuditRepository, MasterTablesRepository, PluRepository, SalesSnapshotRepository,
-    ScaleRepository,
+    AuditRepository, BranchRepository, MasterTablesRepository, PluRepository,
+    SalesSnapshotRepository, ScaleRepository,
 };
 use openscale_storage::{DEFAULT_LOCAL_STORE_ID, Database};
 use uuid::Uuid;
@@ -54,6 +54,10 @@ impl OpenScaleApp {
         ScaleRepository::new(self.db.pool().clone())
     }
 
+    pub fn branch_repo(&self) -> BranchRepository {
+        BranchRepository::new(self.db.pool().clone())
+    }
+
     pub fn plu_repo(&self) -> PluRepository {
         PluRepository::new(self.db.pool().clone())
     }
@@ -75,6 +79,34 @@ impl OpenScaleApp {
         timeout: Duration,
     ) -> Result<Vec<DiscoveredScale>, AppError> {
         discover_all_scales(timeout, &[], &[]).await
+    }
+
+    pub async fn list_branches(&self) -> Result<Vec<Branch>, AppError> {
+        Ok(self.branch_repo().list_active(self.store_id).await?)
+    }
+
+    pub async fn upsert_branch(&self, branch: Branch) -> Result<Branch, AppError> {
+        self.branch_repo().upsert(&branch).await?;
+        Ok(branch)
+    }
+
+    pub async fn delete_branch(&self, branch_id: Uuid) -> Result<bool, AppError> {
+        Ok(self
+            .branch_repo()
+            .soft_delete(self.store_id, branch_id)
+            .await?)
+    }
+
+    pub async fn list_branch_plu_keys(&self, branch_id: Uuid) -> Result<Vec<PluKey>, AppError> {
+        Ok(self.branch_repo().list_plu_keys(branch_id).await?)
+    }
+
+    pub async fn set_branch_plu_keys(
+        &self,
+        branch_id: Uuid,
+        keys: Vec<PluKey>,
+    ) -> Result<usize, AppError> {
+        Ok(self.branch_repo().set_plu_keys(branch_id, &keys).await?)
     }
 
     pub async fn list_scales(&self) -> Result<Vec<Scale>, AppError> {

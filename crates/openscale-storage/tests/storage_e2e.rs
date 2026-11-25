@@ -29,6 +29,7 @@ async fn sqlite_wal_persistence_lifecycle_e2e() {
 
         let scale = Scale {
             id: scale_id,
+            branch_id: None,
             group_id: None,
             name: "Salchichonería 01".to_string(),
             family: ScaleFamily::AveryBerkelXti,

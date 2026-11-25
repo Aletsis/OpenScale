@@ -15,6 +15,28 @@ pub struct Store {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BranchCatalogMode {
+    /// Branch inherits every active PLU in the Master Catalog.
+    #[default]
+    All,
+    /// Branch uses only the subset of PLUs explicitly assigned in `branch_plus`.
+    Selected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Branch {
+    pub id: Uuid,
+    pub code: String,
+    pub name: String,
+    pub address: Option<String>,
+    pub notes: Option<String>,
+    #[serde(default)]
+    pub catalog_mode: BranchCatalogMode,
+    pub meta: SyncMetadata,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScaleGroup {
     pub id: Uuid,
@@ -26,6 +48,8 @@ pub struct ScaleGroup {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Scale {
     pub id: Uuid,
+    #[serde(default)]
+    pub branch_id: Option<Uuid>,
     pub group_id: Option<Uuid>,
     pub name: String,
     pub family: ScaleFamily,

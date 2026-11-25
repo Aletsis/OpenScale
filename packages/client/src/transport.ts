@@ -1,4 +1,5 @@
 import type {
+  Branch,
   DiscoveredScale,
   ImportSelection,
   Plu,
@@ -21,6 +22,13 @@ export type Unsubscribe = () => void;
  * - Phase 2+ Desktop Remote & Phase 4 Web App (`HttpWsTransport`)
  */
 export interface OpenScaleTransport {
+  // Branches
+  listBranches?(): Promise<Branch[]>;
+  upsertBranch?(branch: Branch): Promise<Branch>;
+  deleteBranch?(branchId: string): Promise<boolean>;
+  listBranchPluKeys?(branchId: string): Promise<PluKey[]>;
+  setBranchPluKeys?(branchId: string, keys: PluKey[]): Promise<number>;
+
   // Scales
   discoverScales(): Promise<DiscoveredScale[]>;
   listScales(): Promise<Scale[]>;

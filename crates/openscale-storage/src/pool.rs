@@ -11,6 +11,10 @@ use crate::error::StorageError;
 /// Default local store ID seeded by `0001_init.sql`.
 pub const DEFAULT_LOCAL_STORE_ID: Uuid = Uuid::from_u128(0x0190_0000_0000_7000_8000_0000_0000_0001);
 
+/// Default local branch ID seeded by `0002_branches_and_settings.sql`.
+pub const DEFAULT_LOCAL_BRANCH_ID: Uuid =
+    Uuid::from_u128(0x0190_0000_0000_7000_8000_0000_0000_0010);
+
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
     pub path: PathBuf,

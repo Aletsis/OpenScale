@@ -7,8 +7,8 @@ use openscale_app::{
     ScaleImportApplyRequest, ScaleImportPreview, ScaleImportResult, SyncMode, SyncReport,
 };
 use openscale_domain::{
-    BarcodeFormat, Department, LabelFormat, Plu, PluKey, SalesSnapshot, Scale, ScaleSalesReport,
-    StoredText, Tare, TaxRate,
+    BarcodeFormat, Branch, Department, LabelFormat, Plu, PluKey, SalesSnapshot, Scale,
+    ScaleSalesReport, StoredText, Tare, TaxRate,
 };
 use openscale_driver::{DiscoveredScale, DriverError, LcdFrame, ScaleDriver};
 use openscale_driver_xs::{
@@ -77,6 +77,54 @@ async fn discover_scales(state: State<'_, DesktopState>) -> Result<Vec<Discovere
     state
         .app
         .discover_scales(Duration::from_secs(2))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_branches(state: State<'_, DesktopState>) -> Result<Vec<Branch>, String> {
+    state.app.list_branches().await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn upsert_branch(state: State<'_, DesktopState>, branch: Branch) -> Result<Branch, String> {
+    state
+        .app
+        .upsert_branch(branch)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_branch(state: State<'_, DesktopState>, branch_id: Uuid) -> Result<bool, String> {
+    state
+        .app
+        .delete_branch(branch_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_branch_plu_keys(
+    state: State<'_, DesktopState>,
+    branch_id: Uuid,
+) -> Result<Vec<PluKey>, String> {
+    state
+        .app
+        .list_branch_plu_keys(branch_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_branch_plu_keys(
+    state: State<'_, DesktopState>,
+    branch_id: Uuid,
+    keys: Vec<PluKey>,
+) -> Result<usize, String> {
+    state
+        .app
+        .set_branch_plu_keys(branch_id, keys)
         .await
         .map_err(|e| e.to_string())
 }
@@ -604,6 +652,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             discover_scales,
+            list_branches,
+            upsert_branch,
+            delete_branch,
+            list_branch_plu_keys,
+            set_branch_plu_keys,
             list_scales,
             upsert_scale,
             delete_scale,
