@@ -27,7 +27,7 @@ use crate::import_engine::{
     preview_import_from_scale as preview_import_from_scale_impl,
 };
 use crate::scale_manager::ScaleManager;
-use crate::sync_engine::{SyncEngine, SyncMode, SyncReport};
+use crate::sync_engine::{DeltaSyncPreview, SyncEngine, SyncMode, SyncReport};
 
 /// High-level application facade shared by Phase 1 Tauri IPC and Phase 2 Axum API.
 #[derive(Clone)]
@@ -165,6 +165,21 @@ impl OpenScaleApp {
 
     pub async fn sync_scale(&self, scale_id: Uuid, mode: SyncMode) -> Result<SyncReport, AppError> {
         self.sync.sync_to_scale(self.store_id, scale_id, mode).await
+    }
+
+    pub async fn preview_delta_sync(&self, scale_id: Uuid) -> Result<DeltaSyncPreview, AppError> {
+        self.sync.preview_delta_sync(self.store_id, scale_id).await
+    }
+
+    pub async fn sync_scale_with_options(
+        &self,
+        scale_id: Uuid,
+        mode: SyncMode,
+        include_deletes: bool,
+    ) -> Result<SyncReport, AppError> {
+        self.sync
+            .sync_to_scale_with_options(self.store_id, scale_id, mode, include_deletes)
+            .await
     }
 
     // --- Master Tables (v0.2) ---

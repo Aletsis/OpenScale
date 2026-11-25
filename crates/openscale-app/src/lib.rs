@@ -15,4 +15,4 @@ pub use import_engine::{
 };
 pub use scale_manager::{ScaleHandle, ScaleManager};
 pub use service::OpenScaleApp;
-pub use sync_engine::{SyncEngine, SyncMode, SyncReport};
+pub use sync_engine::{DeltaSyncPreview, SyncEngine, SyncMode, SyncReport};

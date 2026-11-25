@@ -148,6 +148,15 @@ export interface SyncReport {
   sent_plus: number;
   skipped_unchanged: number;
   failed_plus: number;
+  deleted_plus?: number;
+}
+
+export interface DeltaSyncPreview {
+  scale_id: string;
+  new_plus: Plu[];
+  modified_plus: Plu[];
+  deleted_keys: PluKey[];
+  unchanged_count: number;
 }
 
 export interface BulkPriceAdjustment {

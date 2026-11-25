@@ -26,6 +26,17 @@ pub struct SyncReport {
     pub sent_plus: usize,
     pub skipped_unchanged: usize,
     pub failed_plus: usize,
+    #[serde(default)]
+    pub deleted_plus: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeltaSyncPreview {
+    pub scale_id: Uuid,
+    pub new_plus: Vec<Plu>,
+    pub modified_plus: Vec<Plu>,
+    pub deleted_keys: Vec<PluKey>,
+    pub unchanged_count: usize,
 }
 
 /// Orchestrates catalog imports from physical scales and delta/full synchronization to scales.
@@ -108,12 +119,64 @@ impl SyncEngine {
             .collect())
     }
 
+    /// Previews which PLUs are new, modified, or removed for a specific scale before sending.
+    pub async fn preview_delta_sync(
+        &self,
+        store_id: Uuid,
+        scale_id: Uuid,
+    ) -> Result<DeltaSyncPreview, AppError> {
+        let catalog = self.effective_catalog_for_scale(store_id, scale_id).await?;
+        let existing_checksums = self.load_checksums(scale_id).await?;
+
+        let mut new_plus = Vec::new();
+        let mut modified_plus = Vec::new();
+        let mut unchanged_count = 0usize;
+        let mut active_keys = HashSet::with_capacity(catalog.len());
+
+        for plu in catalog {
+            active_keys.insert(plu.key);
+            match existing_checksums.get(&plu.key) {
+                None => new_plus.push(plu),
+                Some(hash) if hash != &plu.delta_hash => modified_plus.push(plu),
+                Some(_) => unchanged_count += 1,
+            }
+        }
+
+        let mut deleted_keys: Vec<PluKey> = existing_checksums
+            .keys()
+            .copied()
+            .filter(|k| !active_keys.contains(k))
+            .collect();
+        deleted_keys.sort();
+
+        Ok(DeltaSyncPreview {
+            scale_id,
+            new_plus,
+            modified_plus,
+            deleted_keys,
+            unchanged_count,
+        })
+    }
+
     /// Synchronizes the local SQLite Master Catalog to a target scale using Delta or Full mode.
     pub async fn sync_to_scale(
         &self,
         store_id: Uuid,
         scale_id: Uuid,
         mode: SyncMode,
+    ) -> Result<SyncReport, AppError> {
+        self.sync_to_scale_with_options(store_id, scale_id, mode, false)
+            .await
+    }
+
+    /// Synchronizes only new/modified PLUs (Delta) or all PLUs (Full), optionally propagating
+    /// removals (`include_deletes`) for PLUs deleted from the catalog or removed from the branch.
+    pub async fn sync_to_scale_with_options(
+        &self,
+        store_id: Uuid,
+        scale_id: Uuid,
+        mode: SyncMode,
+        include_deletes: bool,
     ) -> Result<SyncReport, AppError> {
         let handle = self.scales.get(scale_id).await?;
         let catalog = self.effective_catalog_for_scale(store_id, scale_id).await?;
@@ -122,7 +185,9 @@ impl SyncEngine {
         let mut sent_plus = 0usize;
         let mut skipped_unchanged = 0usize;
         let mut failed_plus = 0usize;
+        let mut deleted_plus = 0usize;
         let now = Utc::now().to_rfc3339();
+        let active_keys: HashSet<PluKey> = catalog.iter().map(|p| p.key).collect();
 
         for plu in &catalog {
             let needs_send = match mode {
@@ -164,6 +229,30 @@ impl SyncEngine {
             }
         }
 
+        if include_deletes {
+            for key in existing_checksums
+                .keys()
+                .copied()
+                .filter(|k| !active_keys.contains(k))
+            {
+                let ok = match handle.delete_plu(key).await {
+                    Ok(()) => true,
+                    Err(AppError::Driver(
+                        openscale_driver::DriverError::NotConnected
+                        | openscale_driver::DriverError::Io(_)
+                        | openscale_driver::DriverError::Timeout,
+                    )) => handle.connect().await.is_ok() && handle.delete_plu(key).await.is_ok(),
+                    Err(_) => false,
+                };
+                if ok {
+                    let _ = self.delete_checksum(scale_id, key).await;
+                    deleted_plus += 1;
+                } else {
+                    failed_plus += 1;
+                }
+            }
+        }
+
         Ok(SyncReport {
             scale_id,
             mode,
@@ -171,7 +260,20 @@ impl SyncEngine {
             sent_plus,
             skipped_unchanged,
             failed_plus,
+            deleted_plus,
         })
+    }
+
+    async fn delete_checksum(&self, scale_id: Uuid, key: PluKey) -> Result<(), AppError> {
+        sqlx::query(
+            "DELETE FROM scale_plu_checksums WHERE scale_id = ? AND did = ? AND plu_number = ?",
+        )
+        .bind(scale_id.to_string())
+        .bind(i64::from(key.did))
+        .bind(key.plu as i64)
+        .execute(self.db.pool())
+        .await?;
+        Ok(())
     }
 
     async fn load_checksums(&self, scale_id: Uuid) -> Result<HashMap<PluKey, String>, AppError> {

@@ -1,5 +1,6 @@
 import type {
   Branch,
+  DeltaSyncPreview,
   DiscoveredScale,
   ImportSelection,
   Plu,
@@ -48,6 +49,12 @@ export interface OpenScaleTransport {
   previewImportFromScale(scaleId: string, selection: ImportSelection): Promise<ScaleImportPreview>;
   applyScaleImport(request: ScaleImportApplyRequest): Promise<ScaleImportResult>;
   syncScale(scaleId: string, mode: SyncMode): Promise<SyncReport>;
+  previewDeltaSync?(scaleId: string): Promise<DeltaSyncPreview>;
+  syncScaleWithOptions?(
+    scaleId: string,
+    mode: SyncMode,
+    includeDeletes: boolean,
+  ): Promise<SyncReport>;
 
   // Real-time events
   subscribe(listener: (event: ScaleEvent) => void): Unsubscribe;

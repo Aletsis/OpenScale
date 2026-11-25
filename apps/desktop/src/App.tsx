@@ -42,6 +42,7 @@ import {
   RefreshCw,
   Scale as ScaleIcon,
   Search,
+  Send,
   Sun,
   Trash2,
   Upload,
@@ -54,6 +55,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useTranslation } from "react-i18next";
 
 import { BranchesDialog } from "./components/BranchesDialog.js";
+import { DeltaSyncDialog } from "./components/DeltaSyncDialog.js";
 import { LabelDesignerView } from "./components/LabelDesignerView.js";
 import { LabelFormatsView } from "./components/LabelFormatsView.js";
 import { MasterTablesView } from "./components/MasterTablesView.js";
@@ -152,6 +154,8 @@ export function App() {
   const [editingScale, setEditingScale] = useState<Scale | null>(null);
   const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>("all");
   const [catalogBranchId, setCatalogBranchId] = useState<string>("all");
+  const [showDeltaSyncDialog, setShowDeltaSyncDialog] = useState(false);
+  const [deltaSyncInitialScaleId, setDeltaSyncInitialScaleId] = useState<string | null>(null);
 
   // Catalog state
   const [search, setSearch] = useState("");
@@ -1446,6 +1450,17 @@ export function App() {
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    disabled={scales.length === 0}
+                    onClick={() => {
+                      setDeltaSyncInitialScaleId(null);
+                      setShowDeltaSyncDialog(true);
+                    }}
+                  >
+                    <Send className="h-4 w-4" />
+                    Enviar solo cambios
+                  </Button>
                   <Button variant="outline" onClick={() => setShowBranchesDialog(true)}>
                     <Building2 className="h-4 w-4" />
                     Sucursales ({branches.length})
@@ -1756,6 +1771,29 @@ export function App() {
           )}
         </div>
       </main>
+
+      <DeltaSyncDialog
+        open={showDeltaSyncDialog}
+        scales={scales}
+        branches={branches}
+        initialScaleId={deltaSyncInitialScaleId}
+        onClose={() => setShowDeltaSyncDialog(false)}
+        onCompleted={(reports) => {
+          const totalSent = reports.reduce((acc, r) => acc + r.report.sent_plus, 0);
+          const totalDel = reports.reduce((acc, r) => acc + (r.report.deleted_plus ?? 0), 0);
+          const totalFail = reports.reduce((acc, r) => acc + r.report.failed_plus, 0);
+          const msg = `Envío de cambios completado en ${reports.length} báscula(s): ${totalSent} enviados${totalDel > 0 ? `, ${totalDel} eliminados` : ""}${totalFail > 0 ? `, ${totalFail} fallidos` : ""}.`;
+          toast({ variant: totalFail > 0 ? "warning" : "success", message: msg });
+          for (const { scale, report } of reports) {
+            appendHistory({
+              operation: "delta",
+              target: `${scale.name} (${scale.ip_address})`,
+              status: report.failed_plus > 0 ? "warning" : "success",
+              details: `${report.sent_plus} enviados, ${report.skipped_unchanged} sin cambios, ${report.deleted_plus ?? 0} bajas, ${report.failed_plus} fallidos`,
+            });
+          }
+        }}
+      />
 
       <BranchesDialog
         open={showBranchesDialog}

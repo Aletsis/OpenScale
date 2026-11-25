@@ -1,5 +1,6 @@
 import type {
   Branch,
+  DeltaSyncPreview,
   DiscoveredScale,
   ImportSelection,
   OpenScaleTransport,
@@ -96,6 +97,18 @@ export class TauriIpcTransport implements OpenScaleTransport {
 
   syncScale(scaleId: string, mode: SyncMode): Promise<SyncReport> {
     return invoke<SyncReport>("sync_scale", { scaleId, mode });
+  }
+
+  previewDeltaSync(scaleId: string): Promise<DeltaSyncPreview> {
+    return invoke<DeltaSyncPreview>("preview_delta_sync", { scaleId });
+  }
+
+  syncScaleWithOptions(
+    scaleId: string,
+    mode: SyncMode,
+    includeDeletes: boolean,
+  ): Promise<SyncReport> {
+    return invoke<SyncReport>("sync_scale_with_options", { scaleId, mode, includeDeletes });
   }
 
   subscribe(listener: (event: ScaleEvent) => void): Unsubscribe {
