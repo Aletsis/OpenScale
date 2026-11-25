@@ -6,8 +6,18 @@ import {
 } from "@openscale/client";
 import { Badge, Button } from "@openscale/ui";
 import { invoke } from "@tauri-apps/api/core";
-import { Globe, Loader2, Save, Send, Sliders } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  Download,
+  FileText,
+  FolderOpen,
+  Globe,
+  Loader2,
+  RefreshCw,
+  Save,
+  Send,
+  Sliders,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ScaleBanksEditor } from "./ScaleBanksEditor.js";
 
@@ -55,6 +65,35 @@ interface ScaleConfigProfileDto {
   updated_at: string;
 }
 
+interface LogFileEntryDto {
+  name: string;
+  path: string;
+  size_bytes: number;
+  modified_at: string | null;
+  is_current: boolean;
+}
+
+interface LogInfoDto {
+  log_dir: string;
+  current_log_file: string;
+  current_size_bytes: number;
+  files: LogFileEntryDto[];
+}
+
+interface LogReadResultDto {
+  file_name: string;
+  file_path: string;
+  total_lines: number;
+  returned_lines: number;
+  content: string;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
 interface ScaleSettingsViewProps {
   scales: Scale[];
   branches: Branch[];
@@ -75,6 +114,77 @@ export function ScaleSettingsView({ scales, branches, storeId, onStatus }: Scale
   const [healthIntervalSecs, setHealthIntervalSecs] = useState(15);
   const [currencySymbol, setCurrencySymbol] = useState("$");
   const [blockSyncOnIdentityConflict, setBlockSyncOnIdentityConflict] = useState(true);
+
+  // Application log viewer state
+  const [logInfo, setLogInfo] = useState<LogInfoDto | null>(null);
+  const [selectedLogFile, setSelectedLogFile] = useState<string>("");
+  const [logLevelFilter, setLogLevelFilter] = useState<"ALL" | "ERROR" | "WARN">("ALL");
+  const [logResult, setLogResult] = useState<LogReadResultDto | null>(null);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+
+  const loadLogs = useCallback(
+    async (fileNameOverride?: string, filterOverride?: "ALL" | "ERROR" | "WARN") => {
+      setIsLoadingLogs(true);
+      try {
+        const info = await invoke<LogInfoDto>("get_log_info");
+        setLogInfo(info);
+        const targetFile =
+          fileNameOverride !== undefined
+            ? fileNameOverride
+            : selectedLogFile || info.files[0]?.name || "";
+        if (!selectedLogFile && targetFile) {
+          setSelectedLogFile(targetFile);
+        }
+        const activeFilter = filterOverride ?? logLevelFilter;
+        const result = await invoke<LogReadResultDto>("read_log_entries", {
+          fileName: targetFile || null,
+          maxLines: 500,
+          levelFilter: activeFilter === "ALL" ? null : activeFilter,
+        });
+        setLogResult(result);
+      } catch (err) {
+        onStatus(`Error leyendo logs: ${String(err)}`);
+      } finally {
+        setIsLoadingLogs(false);
+      }
+    },
+    [logLevelFilter, onStatus, selectedLogFile],
+  );
+
+  useEffect(() => {
+    if (subTab === "app") {
+      void loadLogs();
+    }
+  }, [subTab, loadLogs]);
+
+  const handleOpenLogsDir = async () => {
+    try {
+      await invoke("open_logs_dir");
+    } catch (err) {
+      onStatus(`No se pudo abrir la carpeta de logs: ${String(err)}`);
+    }
+  };
+
+  const handleDownloadLog = async () => {
+    try {
+      const targetFile = selectedLogFile || logInfo?.files[0]?.name || null;
+      const full = await invoke<LogReadResultDto>("read_log_entries", {
+        fileName: targetFile,
+        maxLines: 10000,
+        levelFilter: null,
+      });
+      const blob = new Blob([full.content], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = full.file_name || "openscale.log";
+      anchor.click();
+      URL.revokeObjectURL(url);
+      onStatus(`Log exportado: ${full.file_name}`);
+    } catch (err) {
+      onStatus(`Error exportando log: ${String(err)}`);
+    }
+  };
 
   // Apply to scales state
   const [branchFilter, setBranchFilter] = useState<string>("all");
@@ -435,37 +545,155 @@ export function ScaleSettingsView({ scales, branches, storeId, onStatus }: Scale
       )}
 
       {subTab === "app" && (
-        <div className="grid grid-cols-1 gap-4 rounded-md border border-border bg-card p-4 text-sm sm:grid-cols-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Intervalo monitoreo de red (seg)</span>
-            <input
-              type="number"
-              min={5}
-              max={300}
-              value={healthIntervalSecs}
-              onChange={(ev) => setHealthIntervalSecs(Math.max(5, Number(ev.target.value) || 15))}
-              className="rounded border border-border bg-background px-2.5 py-1.5 font-mono"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Símbolo de moneda</span>
-            <input
-              type="text"
-              maxLength={4}
-              value={currencySymbol}
-              onChange={(ev) => setCurrencySymbol(ev.target.value)}
-              className="rounded border border-border bg-background px-2.5 py-1.5 font-mono"
-            />
-          </label>
-          <label className="flex items-center gap-2 pt-5">
-            <input
-              type="checkbox"
-              checked={blockSyncOnIdentityConflict}
-              onChange={(ev) => setBlockSyncOnIdentityConflict(ev.target.checked)}
-              className="h-4 w-4 accent-primary"
-            />
-            <span className="text-xs">Bloquear sync automático si hay conflicto de IP/Serie</span>
-          </label>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 rounded-md border border-border bg-card p-4 text-sm sm:grid-cols-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">
+                Intervalo monitoreo de red (seg)
+              </span>
+              <input
+                type="number"
+                min={5}
+                max={300}
+                value={healthIntervalSecs}
+                onChange={(ev) =>
+                  setHealthIntervalSecs(Math.max(5, Number(ev.target.value) || 15))
+                }
+                className="rounded border border-border bg-background px-2.5 py-1.5 font-mono"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Símbolo de moneda</span>
+              <input
+                type="text"
+                maxLength={4}
+                value={currencySymbol}
+                onChange={(ev) => setCurrencySymbol(ev.target.value)}
+                className="rounded border border-border bg-background px-2.5 py-1.5 font-mono"
+              />
+            </label>
+            <label className="flex items-center gap-2 pt-5">
+              <input
+                type="checkbox"
+                checked={blockSyncOnIdentityConflict}
+                onChange={(ev) => setBlockSyncOnIdentityConflict(ev.target.checked)}
+                className="h-4 w-4 accent-primary"
+              />
+              <span className="text-xs">
+                Bloquear sync automático si hay conflicto de IP/Serie
+              </span>
+            </label>
+          </div>
+
+          <div className="space-y-3 rounded-md border border-border bg-card p-4 text-xs">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="space-y-1">
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+                  <FileText className="h-4 w-4 text-primary" />
+                  Archivo de Logs y Diagnóstico
+                </h3>
+                <p className="text-muted-foreground">
+                  Los errores detallados de backend, drivers de básculas, base de datos, panics e
+                  interfaz se guardan automáticamente con rotación diaria.
+                </p>
+                {logInfo && (
+                  <p className="font-mono text-[11px] text-muted-foreground select-all">
+                    Archivo activo: {logInfo.current_log_file} (
+                    {formatBytes(logInfo.current_size_bytes)})
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => void handleOpenLogsDir()}>
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  Abrir carpeta
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => void handleDownloadLog()}>
+                  <Download className="h-3.5 w-3.5" />
+                  Descargar log
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={isLoadingLogs}
+                  onClick={() => void loadLogs()}
+                >
+                  {isLoadingLogs ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  Actualizar
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {logInfo && logInfo.files.length > 0 && (
+                <select
+                  value={selectedLogFile || logInfo.files[0]?.name || ""}
+                  onChange={(ev) => {
+                    const next = ev.target.value;
+                    setSelectedLogFile(next);
+                    void loadLogs(next, logLevelFilter);
+                  }}
+                  className="rounded border border-border bg-background px-2 py-1 font-mono text-xs"
+                >
+                  {logInfo.files.map((file) => (
+                    <option key={file.name} value={file.name}>
+                      {file.name} ({formatBytes(file.size_bytes)})
+                      {file.is_current ? " — actual" : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <select
+                value={logLevelFilter}
+                onChange={(ev) => {
+                  const next = ev.target.value as "ALL" | "ERROR" | "WARN";
+                  setLogLevelFilter(next);
+                  void loadLogs(selectedLogFile, next);
+                }}
+                className="rounded border border-border bg-background px-2 py-1 text-xs"
+              >
+                <option value="ALL">Todos los niveles</option>
+                <option value="ERROR">Solo ERROR / PANIC</option>
+                <option value="WARN">WARN + ERROR</option>
+              </select>
+              {logResult && (
+                <span className="text-muted-foreground">
+                  Mostrando {logResult.returned_lines} de {logResult.total_lines} líneas
+                </span>
+              )}
+            </div>
+
+            <div className="max-h-80 overflow-auto rounded border border-border bg-background p-3 font-mono text-[11px] leading-relaxed">
+              {!logResult || !logResult.content ? (
+                <span className="text-muted-foreground">
+                  No hay entradas registradas para el filtro seleccionado.
+                </span>
+              ) : (
+                logResult.content.split("\n").map((line, idx) => {
+                  const isError = line.includes(" [ERROR] ") || line.includes(" [PANIC] ");
+                  const isWarn = line.includes(" [WARN] ");
+                  return (
+                    <div
+                      key={`${idx}-${line.slice(0, 24)}`}
+                      className={
+                        isError
+                          ? "whitespace-pre-wrap break-all text-destructive"
+                          : isWarn
+                            ? "whitespace-pre-wrap break-all text-amber-600 dark:text-amber-400"
+                            : "whitespace-pre-wrap break-all text-foreground/90"
+                      }
+                    >
+                      {line}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </div>
       )}
 

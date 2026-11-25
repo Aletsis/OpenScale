@@ -5,7 +5,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./App.js";
+import { AppErrorBoundary, installGlobalErrorHandlers } from "./logger.js";
 import { TauriIpcTransport } from "./tauri-transport.js";
+
+installGlobalErrorHandlers();
 
 const savedLang = window.localStorage.getItem("openscale.lang");
 const initialLang = savedLang === "en" || savedLang === "es" ? savedLang : "es";
@@ -21,11 +24,13 @@ const root = document.getElementById("root");
 if (root) {
   createRoot(root).render(
     <StrictMode>
-      <OpenScaleProvider transport={transport}>
-        <ToastProvider>
-          <App />
-        </ToastProvider>
-      </OpenScaleProvider>
+      <AppErrorBoundary>
+        <OpenScaleProvider transport={transport}>
+          <ToastProvider>
+            <App />
+          </ToastProvider>
+        </OpenScaleProvider>
+      </AppErrorBoundary>
     </StrictMode>,
   );
 }

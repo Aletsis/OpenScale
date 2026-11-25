@@ -78,6 +78,14 @@ pub async fn check_scale_health(
                                 "IP {} pertenece a serie {} pero respondió serie {}",
                                 scale.ip_address, expected_sn, actual_sn
                             );
+                            tracing::error!(
+                                scale_id = %scale_id,
+                                scale_name = %scale.name,
+                                ip = %scale.ip_address,
+                                expected_serial = %expected_sn,
+                                detected_serial = %actual_sn,
+                                "Scale identity conflict detected during health check"
+                            );
                             identity_conflict = Some(msg);
                             app.scales.emit_identity_conflict(
                                 scale_id,
@@ -134,6 +142,18 @@ pub async fn check_scale_health(
         }
         Err(err) => {
             let error_msg = err.to_string();
+            if previous_status != ScaleStatus::Offline {
+                tracing::warn!(
+                    scale_id = %scale_id,
+                    scale_name = %scale.name,
+                    ip = %scale.ip_address,
+                    port = scale.data_port,
+                    previous_status = ?previous_status,
+                    error = %error_msg,
+                    error_debug = ?err,
+                    "Scale became offline during health check"
+                );
+            }
             app.scale_repo()
                 .update_status(app.store_id, scale_id, ScaleStatus::Offline, None)
                 .await?;
