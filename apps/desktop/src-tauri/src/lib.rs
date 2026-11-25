@@ -423,6 +423,31 @@ async fn upsert_barcode_format(
 }
 
 #[tauri::command]
+async fn scale_list_barcode_formats(
+    state: State<'_, DesktopState>,
+    scale_id: Uuid,
+) -> Result<Vec<BarcodeFormat>, String> {
+    state
+        .app
+        .list_scale_barcode_formats(scale_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn scale_write_barcode_format(
+    state: State<'_, DesktopState>,
+    scale_id: Uuid,
+    fmt: BarcodeFormat,
+) -> Result<BarcodeFormat, String> {
+    state
+        .app
+        .write_scale_barcode_format(scale_id, fmt)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn sync_master_tables(
     state: State<'_, DesktopState>,
     scale_id: Uuid,
@@ -724,6 +749,8 @@ pub fn run() {
             upsert_stored_text,
             list_barcode_formats,
             upsert_barcode_format,
+            scale_list_barcode_formats,
+            scale_write_barcode_format,
             list_label_formats,
             upsert_label_format,
             scale_list_label_formats,

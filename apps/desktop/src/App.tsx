@@ -26,6 +26,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import {
   Activity,
   BarChart3,
+  Barcode,
   Building2,
   Check,
   Database,
@@ -55,6 +56,7 @@ import {
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { BarcodeEditorView } from "./components/BarcodeEditorView.js";
 import { BranchesDialog } from "./components/BranchesDialog.js";
 import { DeltaSyncDialog } from "./components/DeltaSyncDialog.js";
 import { LabelDesignerView } from "./components/LabelDesignerView.js";
@@ -67,7 +69,7 @@ import { ScaleEditDialog } from "./components/ScaleEditDialog.js";
 import { ScaleImportDialog } from "./components/ScaleImportDialog.js";
 import { ServiceConsoleView } from "./components/ServiceConsoleView.js";
 
-type Tab = "scales" | "catalog" | "priceChange" | "masterTables" | "reports" | "service" | "labels" | "sync";
+type Tab = "scales" | "catalog" | "priceChange" | "masterTables" | "reports" | "service" | "barcodes" | "labels" | "sync";
 
 interface SyncHistoryEntry {
   id: string;
@@ -1363,6 +1365,14 @@ export function App() {
             {t("nav.service")}
           </Button>
           <Button
+            variant={activeTab === "barcodes" ? "default" : "ghost"}
+            className="justify-start"
+            onClick={() => setActiveTab("barcodes")}
+          >
+            <Barcode className="h-4 w-4" />
+            Códigos de Barras
+          </Button>
+          <Button
             variant={activeTab === "labels" ? "default" : "ghost"}
             className="justify-start"
             onClick={() => setActiveTab("labels")}
@@ -1446,6 +1456,19 @@ export function App() {
               <h2 className="text-xl font-semibold tracking-tight">{t("nav.service")}</h2>
               <ServiceConsoleView
                 scales={scales}
+                onStatus={(message) => toast({ variant: "info", message })}
+              />
+            </>
+          )}
+
+          {activeTab === "barcodes" && (
+            <>
+              <h2 className="text-xl font-semibold tracking-tight">
+                Editor y Visor de Códigos de Barras (BID 1..32)
+              </h2>
+              <BarcodeEditorView
+                scales={scales}
+                plus={allPlus}
                 onStatus={(message) => toast({ variant: "info", message })}
               />
             </>

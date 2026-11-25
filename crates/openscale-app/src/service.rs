@@ -423,6 +423,33 @@ impl OpenScaleApp {
         Ok(fmt)
     }
 
+    pub async fn list_scale_barcode_formats(
+        &self,
+        scale_id: Uuid,
+    ) -> Result<Vec<BarcodeFormat>, AppError> {
+        let handle = self.scales.get(scale_id).await?;
+        if handle.ping().await.is_err() {
+            handle.connect().await?;
+        }
+        handle.list_barcode_formats().await
+    }
+
+    pub async fn write_scale_barcode_format(
+        &self,
+        scale_id: Uuid,
+        fmt: BarcodeFormat,
+    ) -> Result<BarcodeFormat, AppError> {
+        let handle = self.scales.get(scale_id).await?;
+        if handle.ping().await.is_err() {
+            handle.connect().await?;
+        }
+        handle.upsert_barcode_format(fmt.clone()).await?;
+        self.master_tables_repo()
+            .upsert_barcode_format(&fmt)
+            .await?;
+        Ok(fmt)
+    }
+
     pub async fn list_label_formats(&self) -> Result<Vec<LabelFormat>, AppError> {
         Ok(self
             .master_tables_repo()
