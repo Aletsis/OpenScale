@@ -1,5 +1,6 @@
 import {
   ABML_FONTS,
+  type BarcodeFormat,
   LABEL_FIELD_TYPES,
   LABEL_MAX_SLOTS,
   type LabelFieldModel,
@@ -7,8 +8,11 @@ import {
   type LabelFormatModel,
   type Plu,
   type Scale,
+  type StoredText,
   createBlankLabelFormat,
+  encodeBarcodeToBars,
   estimateLabelHeightMm,
+  fieldStyleAlignment,
   findNextFreePfid,
   findNextFreeSlot,
   getAbmlFontSpec,
@@ -17,6 +21,8 @@ import {
   mmToHundredths,
   mmToTenths,
   modelToLabelFormat,
+  parseBarcodeDefinition,
+  resolveBarcodeTemplate,
   resolveFieldPreviewText,
   rotationDegrees,
   tenthsToMm,
@@ -28,17 +34,23 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   AlertCircle,
   CheckCircle2,
+  Copy,
   Download,
   FilePlus2,
+  Grid3X3,
   Layers,
   Loader2,
   Printer,
+  Redo2,
   RefreshCw,
   RotateCw,
   Search,
   Send,
   Trash2,
+  Undo2,
   Upload,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -99,9 +111,17 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
   const [isSaving, setIsSaving] = useState(false);
   const [previewPluId, setPreviewPluId] = useState<string>(plus[0]?.id ?? "");
   const [sampleWeightKg, setSampleWeightKg] = useState<number>(0.5);
+  const [zoom, setZoom] = useState<number>(1.2);
+  const [showGrid, setShowGrid] = useState<boolean>(true);
+  const [snapMm, setSnapMm] = useState<number>(0.5);
+  const [invertYAxis, setInvertYAxis] = useState<boolean>(false);
+  const [undoStack, setUndoStack] = useState<LabelFormatModel[]>([]);
+  const [redoStack, setRedoStack] = useState<LabelFormatModel[]>([]);
   const dragRef = useRef<DragState | null>(null);
   const isDirtyRef = useRef(false);
   const activeRequestRef = useRef(0);
+
+  const pxPerMm = PX_PER_MM * zoom;
 
   isDirtyRef.current = isDirty;
 
@@ -140,6 +160,19 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
     queryFn: () => invoke<LabelFormat[]>("list_label_formats"),
   });
 
+  const barcodeFormatsQuery = useQuery({
+    queryKey: ["barcode_formats"],
+    queryFn: () => invoke<BarcodeFormat[]>("list_barcode_formats"),
+  });
+
+  const storedTextsQuery = useQuery({
+    queryKey: ["stored_texts"],
+    queryFn: () => invoke<StoredText[]>("list_stored_texts"),
+  });
+
+  const barcodeFormats = barcodeFormatsQuery.data ?? [];
+  const storedTexts = storedTextsQuery.data ?? [];
+
   const localModels = useMemo(() => {
     const items = localFormatsQuery.data ?? [];
     return items.map(labelFormatToModel).sort((a, b) => a.pfid - b.pfid);
@@ -161,8 +194,14 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
   const selectFormatIntoEditor = useCallback((fmt: LabelFormatModel) => {
     const cloned = cloneFormatModel(fmt);
     setLabel(cloned);
-    setHeightMm(estimateLabelHeightMm(cloned.fields));
+    setHeightMm(
+      cloned.height_tenths_mm && cloned.height_tenths_mm > 0
+        ? tenthsToMm(cloned.height_tenths_mm)
+        : estimateLabelHeightMm(cloned.fields),
+    );
     setSelectedSlot(cloned.fields[0]?.slot ?? null);
+    setUndoStack([]);
+    setRedoStack([]);
     setIsDirty(false);
   }, []);
 
@@ -259,16 +298,75 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
       : `FT ${selectedField.field_type}`;
   }, [selectedField]);
 
-  const updateLabel = (updater: (prev: LabelFormatModel) => LabelFormatModel) => {
-    setLabel(updater);
-    setIsDirty(true);
+  const updateLabel = useCallback(
+    (updater: (prev: LabelFormatModel) => LabelFormatModel, recordHistory = true) => {
+      setLabel((prev) => {
+        if (recordHistory) {
+          setUndoStack((stack) => [...stack.slice(-29), cloneFormatModel(prev)]);
+          setRedoStack([]);
+        }
+        return updater(prev);
+      });
+      setIsDirty(true);
+    },
+    [],
+  );
+
+  const handleUndo = () => {
+    setUndoStack((stack) => {
+      const previous = stack[stack.length - 1];
+      if (!previous) {
+        return stack;
+      }
+      setRedoStack((r) => [...r, cloneFormatModel(label)]);
+      setLabel(previous);
+      setIsDirty(true);
+      return stack.slice(0, -1);
+    });
   };
 
-  const updateField = (slot: number, patch: Partial<LabelFieldModel>) => {
-    updateLabel((prev) => ({
-      ...prev,
-      fields: prev.fields.map((f) => (f.slot === slot ? { ...f, ...patch } : f)),
-    }));
+  const handleRedo = () => {
+    setRedoStack((stack) => {
+      const next = stack[stack.length - 1];
+      if (!next) {
+        return stack;
+      }
+      setUndoStack((u) => [...u, cloneFormatModel(label)]);
+      setLabel(next);
+      setIsDirty(true);
+      return stack.slice(0, -1);
+    });
+  };
+
+  const updateField = useCallback(
+    (slot: number, patch: Partial<LabelFieldModel>, recordHistory = true) => {
+      updateLabel(
+        (prev) => ({
+          ...prev,
+          fields: prev.fields.map((f) => (f.slot === slot ? { ...f, ...patch } : f)),
+        }),
+        recordHistory,
+      );
+    },
+    [updateLabel],
+  );
+
+  const handleDuplicateField = (field: LabelFieldModel) => {
+    const nextSlot = findNextFreeSlot(label.fields);
+    if (nextSlot === null) {
+      onStatus(`Límite alcanzado: máximo ${LABEL_MAX_SLOTS} campos por etiqueta XS.`);
+      return;
+    }
+    const copy: LabelFieldModel = {
+      ...field,
+      slot: nextSlot,
+      x1: Math.min(mmToTenths(widthMm) - 20, field.x1 + 20),
+      y1: Math.min(mmToTenths(heightMm) - 10, field.y1 + 20),
+      x2: Math.min(mmToTenths(widthMm), field.x2 + 20),
+      y2: Math.min(mmToTenths(heightMm), field.y2 + 20),
+    };
+    updateLabel((prev) => ({ ...prev, fields: [...prev.fields, copy] }));
+    setSelectedSlot(nextSlot);
   };
 
   const handleAddField = (ft: number) => {
@@ -345,7 +443,11 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
           domainFormatsByPfid[label.pfid] ??
           localFormatsQuery.data?.find((f) => f.pfid === label.pfid) ??
           null;
-        const domainPayload = modelToLabelFormat(label, DEFAULT_STORE_ID, existingDomain);
+        const domainPayload = modelToLabelFormat(
+          { ...label, height_tenths_mm: mmToTenths(heightMm) },
+          DEFAULT_STORE_ID,
+          existingDomain,
+        );
         const saved = await invoke<LabelFormat>("scale_write_label_format", {
           scaleId: selectedScale.id,
           fmt: domainPayload,
@@ -422,10 +524,12 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
     if (!drag) {
       return;
     }
-    const dxMm = Math.round(((ev.clientX - drag.startClientX) / PX_PER_MM) * 2) / 2;
-    const dyMm = Math.round(((ev.clientY - drag.startClientY) / PX_PER_MM) * 2) / 2;
-    const dxTenths = mmToTenths(Math.abs(dxMm)) * (dxMm < 0 ? -1 : 1);
-    const dyTenths = mmToTenths(Math.abs(dyMm)) * (dyMm < 0 ? -1 : 1);
+    const rawDxMm = (ev.clientX - drag.startClientX) / pxPerMm;
+    const rawDyMm = ((ev.clientY - drag.startClientY) / pxPerMm) * (invertYAxis ? -1 : 1);
+    const dxMm = snapMm > 0 ? Math.round(rawDxMm / snapMm) * snapMm : rawDxMm;
+    const dyMm = snapMm > 0 ? Math.round(rawDyMm / snapMm) * snapMm : rawDyMm;
+    const dxTenths = Math.round(dxMm * 10);
+    const dyTenths = Math.round(dyMm * 10);
     const maxXTenths = mmToTenths(widthMm);
     const maxYTenths = mmToTenths(heightMm);
 
@@ -434,21 +538,65 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
       const boxH = drag.origY2 - drag.origY1;
       const nextX1 = Math.max(0, Math.min(maxXTenths - boxW, drag.origX1 + dxTenths));
       const nextY1 = Math.max(0, Math.min(maxYTenths - boxH, drag.origY1 + dyTenths));
-      updateField(drag.slot, {
-        x1: nextX1,
-        y1: nextY1,
-        x2: nextX1 + boxW,
-        y2: nextY1 + boxH,
-      });
+      updateField(
+        drag.slot,
+        {
+          x1: nextX1,
+          y1: nextY1,
+          x2: nextX1 + boxW,
+          y2: nextY1 + boxH,
+        },
+        false,
+      );
     } else {
       const nextX2 = Math.max(drag.origX1 + 20, Math.min(maxXTenths, drag.origX2 + dxTenths));
       const nextY2 = Math.max(drag.origY1 + 10, Math.min(maxYTenths, drag.origY2 + dyTenths));
-      updateField(drag.slot, { x2: nextX2, y2: nextY2 });
+      updateField(drag.slot, { x2: nextX2, y2: nextY2 }, false);
     }
   };
 
-  const stopDrag = () => {
+  const stopDrag = (ev?: React.PointerEvent<HTMLDivElement>) => {
+    if (ev && dragRef.current) {
+      try {
+        ev.currentTarget.releasePointerCapture(ev.pointerId);
+      } catch {
+        // Ignore if not captured
+      }
+    }
     dragRef.current = null;
+  };
+
+  const onCanvasKeyDown = (ev: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!selectedField) {
+      return;
+    }
+    const stepTenths = ev.shiftKey ? 20 : 5; // 2.0mm or 0.5mm
+    const maxX = mmToTenths(widthMm);
+    const maxY = mmToTenths(heightMm);
+    const w = selectedField.x2 - selectedField.x1;
+    const h = selectedField.y2 - selectedField.y1;
+    const ySign = invertYAxis ? -1 : 1;
+
+    if (ev.key === "ArrowLeft") {
+      ev.preventDefault();
+      const x1 = Math.max(0, selectedField.x1 - stepTenths);
+      updateField(selectedField.slot, { x1, x2: x1 + w });
+    } else if (ev.key === "ArrowRight") {
+      ev.preventDefault();
+      const x1 = Math.min(maxX - w, selectedField.x1 + stepTenths);
+      updateField(selectedField.slot, { x1, x2: x1 + w });
+    } else if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      const y1 = Math.max(0, Math.min(maxY - h, selectedField.y1 - stepTenths * ySign));
+      updateField(selectedField.slot, { y1, y2: y1 + h });
+    } else if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      const y1 = Math.max(0, Math.min(maxY - h, selectedField.y1 + stepTenths * ySign));
+      updateField(selectedField.slot, { y1, y2: y1 + h });
+    } else if (ev.key === "Delete" || ev.key === "Backspace") {
+      ev.preventDefault();
+      handleDeleteField(selectedField.slot);
+    }
   };
 
   const hTicks = useMemo(() => {
@@ -541,6 +689,77 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
           <Button size="sm" variant="outline" onClick={handleNewBlankFormat}>
             <FilePlus2 className="h-3.5 w-3.5" /> {t("labels.newFormat")}
           </Button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button
+            size="icon"
+            variant="outline"
+            disabled={undoStack.length === 0}
+            onClick={handleUndo}
+            title="Deshacer"
+          >
+            <Undo2 className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant="outline"
+            disabled={redoStack.length === 0}
+            onClick={handleRedo}
+            title="Rehacer"
+          >
+            <Redo2 className="h-3.5 w-3.5" />
+          </Button>
+          <div className="h-5 w-px bg-border" />
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => setZoom((z) => Math.max(0.6, Number((z - 0.2).toFixed(1))))}
+            title="Alejar"
+          >
+            <ZoomOut className="h-3.5 w-3.5" />
+          </Button>
+          <span className="w-11 text-center font-mono text-xs tabular-nums">
+            {Math.round(zoom * 100)}%
+          </span>
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => setZoom((z) => Math.min(2.4, Number((z + 0.2).toFixed(1))))}
+            title="Acercar"
+          >
+            <ZoomIn className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="icon"
+            variant={showGrid ? "secondary" : "outline"}
+            onClick={() => setShowGrid((g) => !g)}
+            title="Mostrar/ocultar cuadrícula"
+          >
+            <Grid3X3 className="h-3.5 w-3.5" />
+          </Button>
+          <select
+            value={snapMm}
+            onChange={(ev) => setSnapMm(Number(ev.target.value))}
+            title="Ajuste (snap)"
+            className="rounded border border-border bg-background px-1.5 py-1 text-xs"
+          >
+            <option value={0}>Libre</option>
+            <option value={0.5}>Snap 0.5mm</option>
+            <option value={1}>Snap 1mm</option>
+          </select>
+          <label
+            className="flex cursor-pointer items-center gap-1 rounded border border-border bg-background px-2 py-1 text-xs"
+            title="Invertir eje Y (origen inferior-izquierdo)"
+          >
+            <input
+              type="checkbox"
+              checked={invertYAxis}
+              onChange={(ev) => setInvertYAxis(ev.target.checked)}
+              className="h-3 w-3 accent-primary"
+            />
+            <span>Origen Y↓</span>
+          </label>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -703,41 +922,85 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
 
       {/* Main 3-Column WYSIWYG Workspace */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        {/* Left Palette */}
-        <div className="space-y-1.5 rounded-md border border-border bg-card p-3 lg:col-span-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {t("labels.addField")}
-          </h3>
-          <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-1">
-            {LABEL_FIELD_TYPES.map((item) => (
-              <Button
-                key={item.ft}
-                size="sm"
-                variant="outline"
-                className="justify-start text-xs"
-                onClick={() => handleAddField(item.ft)}
-              >
-                <span className="mr-1.5 font-mono text-[10px] text-muted-foreground">
-                  {item.ft}
-                </span>
-                <span className="truncate">{item.label}</span>
-              </Button>
-            ))}
+        {/* Left Palette + Active Layers */}
+        <div className="space-y-4 rounded-md border border-border bg-card p-3 lg:col-span-3">
+          <div>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("labels.addField")}
+            </h3>
+            <div className="grid max-h-64 grid-cols-2 gap-1.5 overflow-y-auto pr-1 lg:grid-cols-1">
+              {LABEL_FIELD_TYPES.map((item) => (
+                <Button
+                  key={item.ft}
+                  size="sm"
+                  variant="outline"
+                  className="justify-start text-xs"
+                  onClick={() => handleAddField(item.ft)}
+                >
+                  <span className="mr-1.5 font-mono text-[10px] text-muted-foreground">
+                    {item.ft}
+                  </span>
+                  <span className="truncate">{item.label}</span>
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="border-t border-border pt-3">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Capas ({label.fields.length})
+            </h3>
+            <div className="max-h-56 space-y-1 overflow-y-auto pr-1 text-xs">
+              {label.fields.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">Sin campos en este formato.</p>
+              ) : (
+                label.fields.map((f) => {
+                  const meta = LABEL_FIELD_TYPES.find((item) => item.ft === f.field_type);
+                  const active = f.slot === selectedSlot;
+                  return (
+                    <button
+                      key={`layer-${f.slot}`}
+                      type="button"
+                      onClick={() => setSelectedSlot(f.slot)}
+                      className={`flex w-full cursor-pointer items-center justify-between rounded border px-2 py-1 text-left ${
+                        active
+                          ? "border-primary bg-primary/10 font-medium text-primary"
+                          : "border-border bg-background hover:bg-muted/50"
+                      }`}
+                    >
+                      <span className="truncate">
+                        #{f.slot} {meta?.label ?? `FT ${f.field_type}`}
+                      </span>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {tenthsToMm(f.x1).toFixed(0)},{tenthsToMm(f.y1).toFixed(0)}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
 
         {/* Center Canvas with mm Rulers */}
-        <div className="flex flex-col items-center justify-start overflow-auto rounded-md border border-border bg-muted/40 p-6 lg:col-span-6">
+        <div
+          role="application"
+          aria-label="Label design canvas"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: Interactive canvas handles keyboard shortcuts and arrow-key positioning
+          tabIndex={0}
+          onKeyDown={onCanvasKeyDown}
+          className="flex flex-col items-center justify-start overflow-auto rounded-md border border-border bg-muted/40 p-6 outline-none focus:ring-1 focus:ring-primary/30 lg:col-span-6"
+        >
           <div className="inline-block select-none">
             {/* Top Horizontal Ruler (mm) */}
-            <div className="ml-7 flex items-end" style={{ width: widthMm * PX_PER_MM, height: 22 }}>
+            <div className="ml-7 flex items-end" style={{ width: widthMm * pxPerMm, height: 22 }}>
               <div className="relative h-full w-full border-b border-border text-[9px] text-muted-foreground">
                 {hTicks.map((mm) => (
                   <div
                     key={mm}
                     className="absolute bottom-0 border-l border-border"
                     style={{
-                      left: mm * PX_PER_MM,
+                      left: mm * pxPerMm,
                       height: mm % 10 === 0 ? 12 : 6,
                     }}
                   >
@@ -751,14 +1014,14 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
               {/* Left Vertical Ruler (mm) */}
               <div
                 className="relative w-7 border-r border-border text-[9px] text-muted-foreground"
-                style={{ height: heightMm * PX_PER_MM }}
+                style={{ height: heightMm * pxPerMm }}
               >
                 {vTicks.map((mm) => (
                   <div
                     key={mm}
                     className="absolute right-0 border-t border-border"
                     style={{
-                      top: mm * PX_PER_MM,
+                      top: (invertYAxis ? heightMm - mm : mm) * pxPerMm,
                       width: mm % 10 === 0 ? 12 : 6,
                     }}
                   >
@@ -773,22 +1036,68 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
               <div
                 className="relative overflow-hidden rounded-xs border border-slate-400 bg-white text-slate-900 shadow-md"
                 style={{
-                  width: widthMm * PX_PER_MM,
-                  height: heightMm * PX_PER_MM,
+                  width: widthMm * pxPerMm,
+                  height: heightMm * pxPerMm,
+                  backgroundImage: showGrid
+                    ? "linear-gradient(to right, rgba(148,163,184,0.18) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.18) 1px, transparent 1px)"
+                    : undefined,
+                  backgroundSize: showGrid ? `${5 * pxPerMm}px ${5 * pxPerMm}px` : undefined,
                 }}
                 onPointerMove={onCanvasPointerMove}
                 onPointerUp={stopDrag}
-                onPointerLeave={stopDrag}
+                onPointerCancel={stopDrag}
                 onPointerDown={() => setSelectedSlot(null)}
               >
                 {label.fields.map((field) => {
-                  const left = tenthsToMm(field.x1) * PX_PER_MM;
-                  const top = tenthsToMm(field.y1) * PX_PER_MM;
-                  const w = Math.max(12, tenthsToMm(field.x2 - field.x1) * PX_PER_MM);
-                  const h = Math.max(8, tenthsToMm(field.y2 - field.y1) * PX_PER_MM);
+                  const left = tenthsToMm(field.x1) * pxPerMm;
+                  const rawTopMm = tenthsToMm(field.y1);
+                  const rawBottomMm = tenthsToMm(field.y2);
+                  const top =
+                    (invertYAxis ? Math.max(0, heightMm - rawBottomMm) : rawTopMm) * pxPerMm;
+                  const w = Math.max(8, tenthsToMm(field.x2 - field.x1) * pxPerMm);
+                  const h = Math.max(4, tenthsToMm(field.y2 - field.y1) * pxPerMm);
                   const fontSpec = getAbmlFontSpec(field.font);
+                  const scaledFontPx = Math.max(7, fontSpec.heightMm * pxPerMm);
+                  const alignment = fieldStyleAlignment(field.style);
+                  const isMultiline =
+                    field.field_type === 1 ||
+                    field.field_type === 2 ||
+                    field.field_type === 3 ||
+                    field.field_type === 11 ||
+                    field.field_type === 12 ||
+                    field.field_type === 13 ||
+                    field.field_type === 142;
                   const isSelected = field.slot === selectedSlot;
-                  const text = resolveFieldPreviewText(field, previewPlu, sampleWeightKg);
+                  const text = resolveFieldPreviewText(
+                    field,
+                    previewPlu,
+                    sampleWeightKg,
+                    storedTexts,
+                    barcodeFormats,
+                  );
+
+                  const barcodeFmt =
+                    field.field_type === 10
+                      ? barcodeFormats.find(
+                          (b) => b.bid === (field.dsr || previewPlu?.barcode_format_id || 1),
+                        )
+                      : null;
+                  const barcodeDef =
+                    field.field_type === 10 ? parseBarcodeDefinition(barcodeFmt) : null;
+                  const barcodeSvg =
+                    field.field_type === 10 && barcodeDef
+                      ? encodeBarcodeToBars(
+                          resolveBarcodeTemplate(barcodeDef, previewPlu, sampleWeightKg).code,
+                          barcodeDef.bt,
+                        )
+                      : null;
+
+                  const justifyClass =
+                    alignment === "center"
+                      ? "justify-center text-center"
+                      : alignment === "right"
+                        ? "justify-end text-right"
+                        : "justify-start text-left";
 
                   return (
                     <div
@@ -796,6 +1105,9 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
                       onPointerDown={(ev) => {
                         ev.stopPropagation();
                         setSelectedSlot(field.slot);
+                        setUndoStack((stack) => [...stack.slice(-29), cloneFormatModel(label)]);
+                        setRedoStack([]);
+                        ev.currentTarget.parentElement?.setPointerCapture(ev.pointerId);
                         dragRef.current = {
                           slot: field.slot,
                           mode: "move",
@@ -809,8 +1121,8 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
                       }}
                       className={`absolute cursor-move overflow-hidden ${
                         isSelected
-                          ? "ring-2 ring-primary ring-offset-1"
-                          : "hover:ring-1 hover:ring-slate-400"
+                          ? "z-20 ring-2 ring-primary ring-offset-1"
+                          : "z-10 hover:ring-1 hover:ring-slate-400"
                       } ${field.field_type === 58 ? "border-2 border-slate-900" : ""} ${
                         field.field_type === 57 ? "bg-slate-900" : ""
                       }`}
@@ -823,23 +1135,44 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
                         transformOrigin: "center center",
                       }}
                     >
-                      {field.field_type === 10 ? (
-                        <div className="flex h-full w-full flex-col items-center justify-between px-1 py-0.5">
-                          <div
+                      {field.field_type === 10 && barcodeSvg ? (
+                        <div className="flex h-full w-full flex-col items-center justify-between px-0.5 py-0.5">
+                          <svg
+                            role="img"
+                            aria-label="Barcode preview"
+                            viewBox={`0 0 ${barcodeSvg.totalModules} 30`}
                             className="h-3/4 w-full"
-                            style={{
-                              backgroundImage:
-                                "repeating-linear-gradient(90deg, #0f172a 0px, #0f172a 2px, transparent 2px, transparent 4px, #0f172a 4px, #0f172a 5px, transparent 5px, transparent 8px)",
-                            }}
-                          />
-                          <span className="font-mono text-[9px] leading-none">{text}</span>
+                            preserveAspectRatio="none"
+                          >
+                            {barcodeSvg.bars.map((bar) => (
+                              <rect
+                                key={bar.x}
+                                x={bar.x}
+                                y={0}
+                                width={bar.width}
+                                height={30}
+                                fill="#0f172a"
+                              />
+                            ))}
+                          </svg>
+                          <span
+                            className="font-mono leading-none tracking-tight"
+                            style={{ fontSize: Math.max(7, Math.min(11, h * 0.22)) }}
+                          >
+                            {text}
+                          </span>
                         </div>
-                      ) : (
+                      ) : field.field_type === 57 || field.field_type === 58 ? null : (
                         <div
-                          className="flex h-full w-full items-center whitespace-nowrap px-0.5 leading-none"
+                          className={`flex h-full w-full items-start px-0.5 leading-[1.08] ${justifyClass} ${
+                            isMultiline
+                              ? "whitespace-pre-wrap break-words"
+                              : "items-center whitespace-nowrap"
+                          }`}
                           style={{
-                            fontSize: fontSpec.pxSize,
+                            fontSize: scaledFontPx,
                             fontWeight: fontSpec.bold ? 700 : 400,
+                            fontFamily: "Arial, Helvetica, sans-serif",
                           }}
                         >
                           {text}
@@ -850,6 +1183,11 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
                         <div
                           onPointerDown={(ev) => {
                             ev.stopPropagation();
+                            setUndoStack((stack) => [...stack.slice(-29), cloneFormatModel(label)]);
+                            setRedoStack([]);
+                            ev.currentTarget.parentElement?.parentElement?.setPointerCapture(
+                              ev.pointerId,
+                            );
                             dragRef.current = {
                               slot: field.slot,
                               mode: "resize",
@@ -943,13 +1281,24 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
                   </h3>
                   <p className="truncate text-[11px] text-foreground">{selectedFieldTypeLabel}</p>
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => handleDeleteField(selectedField.slot)}
-                >
-                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="Duplicar campo"
+                    onClick={() => handleDuplicateField(selectedField)}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="Eliminar campo"
+                    onClick={() => handleDeleteField(selectedField.slot)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </Button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -1020,6 +1369,21 @@ export function LabelDesignerView({ scales, plus, onStatus }: LabelDesignerViewP
                       {f.label}
                     </option>
                   ))}
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span>Alineación (Style)</span>
+                <select
+                  value={selectedField.style}
+                  onChange={(ev) =>
+                    updateField(selectedField.slot, { style: Number(ev.target.value) })
+                  }
+                  className="rounded border border-border bg-background px-2 py-1"
+                >
+                  <option value={49}>49 (&apos;1&apos;) — Izquierda</option>
+                  <option value={50}>50 (&apos;2&apos;) — Centrado</option>
+                  <option value={51}>51 (&apos;3&apos;) — Derecha</option>
                 </select>
               </label>
 

@@ -20,6 +20,9 @@ pub struct LabelField {
     pub y2: u16,
     pub font: char,
     pub dsr: u8,
+    /// Trailing 4 bytes (`+13..+16`) of each 17-byte slot preserved for lossless roundtrip.
+    #[serde(default)]
+    pub extra: [u8; 4],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +73,12 @@ impl LabelFormatRecord {
                 y2: u16::from_be_bytes([raw[base + 9], raw[base + 10]]),
                 font: char::from(raw[base + 11]),
                 dsr: raw[base + 12],
+                extra: [
+                    raw[base + 13],
+                    raw[base + 14],
+                    raw[base + 15],
+                    raw[base + 16],
+                ],
             });
         }
 
@@ -119,6 +128,7 @@ impl LabelFormatRecord {
             out[base + 9..base + 11].copy_from_slice(&field.y2.to_be_bytes());
             out[base + 11] = field.font as u8;
             out[base + 12] = field.dsr;
+            out[base + 13..base + 17].copy_from_slice(&field.extra);
         }
 
         // Scale recalculates final 2-byte checksum when zeroed

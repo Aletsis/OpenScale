@@ -1179,6 +1179,7 @@ mod tests {
                     y2: 90,
                     font: 'C',
                     dsr: 0,
+                    extra: [0; 4],
                 }],
                 raw: vec![0u8; LABEL_FORMAT_LEN],
             };
@@ -1620,6 +1621,7 @@ mod tests {
             y2: 80,
             font: 'C',
             dsr: 0,
+            extra: [0; 4],
         });
         assert!(is_populated_label_format(&fields_only));
     }
@@ -1641,6 +1643,7 @@ mod tests {
             y2: 200,
             font: 'E',
             dsr: 3,
+            extra: [0; 4],
         };
         let fmt = LabelFormat {
             id: new_id(),
