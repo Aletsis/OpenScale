@@ -159,6 +159,25 @@ export interface DeltaSyncPreview {
   unchanged_count: number;
 }
 
+export interface PriceChangeItem {
+  key: PluKey;
+  price_1: number;
+  price_2?: number | null;
+  price_3?: number | null;
+}
+
+export interface PriceChangeScaleResult {
+  scale_id: string;
+  updated: number;
+  failed: number;
+  error: string | null;
+}
+
+export interface PriceChangeReport {
+  updated_catalog: number;
+  scale_results: PriceChangeScaleResult[];
+}
+
 export interface BulkPriceAdjustment {
   mode: "percent" | "fixed_cents";
   value: number;

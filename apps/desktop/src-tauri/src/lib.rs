@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use openscale_app::{
     DEFAULT_HEALTH_CHECK_INTERVAL, DeltaSyncPreview, ImportSelection, OpenScaleApp,
-    ScaleHealthCheckResult, ScaleImportApplyRequest, ScaleImportPreview, ScaleImportResult,
-    SyncMode, SyncReport,
+    PriceChangeItem, PriceChangeReport, ScaleHealthCheckResult, ScaleImportApplyRequest,
+    ScaleImportPreview, ScaleImportResult, SyncMode, SyncReport,
 };
 use openscale_domain::{
     BarcodeFormat, Branch, Department, LabelFormat, Plu, PluKey, SalesSnapshot, Scale,
@@ -315,6 +315,20 @@ async fn sync_scale_with_options(
     state
         .app
         .sync_scale_with_options(scale_id, mode, include_deletes)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn apply_price_changes(
+    state: State<'_, DesktopState>,
+    items: Vec<PriceChangeItem>,
+    target_scale_ids: Vec<Uuid>,
+    send_immediately: bool,
+) -> Result<PriceChangeReport, String> {
+    state
+        .app
+        .apply_price_changes(items, target_scale_ids, send_immediately)
         .await
         .map_err(|e| e.to_string())
 }
@@ -699,6 +713,7 @@ pub fn run() {
             sync_scale,
             preview_delta_sync,
             sync_scale_with_options,
+            apply_price_changes,
             list_departments,
             upsert_department,
             list_tares,

@@ -264,6 +264,21 @@ impl SyncEngine {
         })
     }
 
+    pub async fn record_plu_checksum_if_synced(
+        &self,
+        scale_id: Uuid,
+        key: PluKey,
+        previous_hash: &str,
+        new_hash: &str,
+    ) -> Result<(), AppError> {
+        let existing = self.load_checksums(scale_id).await?;
+        if existing.get(&key).is_some_and(|h| h == previous_hash) {
+            let now = Utc::now().to_rfc3339();
+            self.record_checksum(scale_id, key, new_hash, &now).await?;
+        }
+        Ok(())
+    }
+
     async fn delete_checksum(&self, scale_id: Uuid, key: PluKey) -> Result<(), AppError> {
         sqlx::query(
             "DELETE FROM scale_plu_checksums WHERE scale_id = ? AND did = ? AND plu_number = ?",

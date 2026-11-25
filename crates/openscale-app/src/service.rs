@@ -3,9 +3,10 @@ use std::time::Duration;
 use chrono::Utc;
 use openscale_domain::types::new_id;
 use openscale_domain::{
-    BarcodeFormat, Branch, Department, LabelFormat, Plu, PluKey, SalesSnapshot, Scale,
-    ScaleSalesReport, StoredText, SyncMetadata, Tare, TaxRate,
+    AuditLog, BarcodeFormat, Branch, Department, LabelFormat, MoneyCents, Plu, PluKey,
+    SalesSnapshot, Scale, ScaleSalesReport, StoredText, SyncMetadata, Tare, TaxRate,
 };
+use serde::{Deserialize, Serialize};
 use openscale_driver::DiscoveredScale;
 use openscale_storage::repos::{
     AuditRepository, BranchRepository, MasterTablesRepository, PluRepository,
@@ -28,6 +29,30 @@ use crate::import_engine::{
 };
 use crate::scale_manager::ScaleManager;
 use crate::sync_engine::{DeltaSyncPreview, SyncEngine, SyncMode, SyncReport};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PriceChangeItem {
+    pub key: PluKey,
+    pub price_1: MoneyCents,
+    #[serde(default)]
+    pub price_2: Option<MoneyCents>,
+    #[serde(default)]
+    pub price_3: Option<MoneyCents>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PriceChangeScaleResult {
+    pub scale_id: Uuid,
+    pub updated: usize,
+    pub failed: usize,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PriceChangeReport {
+    pub updated_catalog: usize,
+    pub scale_results: Vec<PriceChangeScaleResult>,
+}
 
 /// High-level application facade shared by Phase 1 Tauri IPC and Phase 2 Axum API.
 #[derive(Clone)]
@@ -180,6 +205,158 @@ impl OpenScaleApp {
         self.sync
             .sync_to_scale_with_options(self.store_id, scale_id, mode, include_deletes)
             .await
+    }
+
+    /// Updates global Master Catalog prices (P1/P2/P3) for the given PLUs, records an audit entry,
+    /// and optionally pushes fast `CHANGE_PRICE` (`CMD 5` on XS / `READONE+WRITE` on XTi) directly
+    /// to each selected scale whose branch includes that PLU.
+    pub async fn apply_price_changes(
+        &self,
+        items: Vec<PriceChangeItem>,
+        target_scale_ids: Vec<Uuid>,
+        send_immediately: bool,
+    ) -> Result<PriceChangeReport, AppError> {
+        let plu_repo = self.plu_repo();
+        let now = Utc::now();
+        let mut updated_records: Vec<(Plu, String)> = Vec::new();
+
+        for item in &items {
+            let Some(mut plu) = plu_repo.get_by_key(self.store_id, item.key).await? else {
+                continue;
+            };
+            let prev_hash = plu.delta_hash.clone();
+            let prev_p1 = plu.price_1.0;
+
+            plu.price_1 = item.price_1;
+            if let Some(p2) = item.price_2 {
+                plu.price_2 = p2;
+            }
+            if let Some(p3) = item.price_3 {
+                plu.price_3 = p3;
+            }
+            plu.delta_hash = plu.compute_delta_hash();
+            plu.meta.sync_version += 1;
+            plu.meta.updated_at = now;
+            plu_repo.upsert(&plu).await?;
+
+            let _ = self
+                .audit_repo()
+                .record(&AuditLog {
+                    id: new_id(),
+                    store_id: self.store_id,
+                    actor_id: None,
+                    actor_name: "local".to_string(),
+                    action: "price_change".to_string(),
+                    target_type: "plu".to_string(),
+                    target_id: Some(format!("{}:{}", plu.key.did, plu.key.plu)),
+                    details_json: Some(
+                        serde_json::json!({
+                            "previous_price_1": prev_p1,
+                            "new_price_1": plu.price_1.0,
+                            "new_price_2": plu.price_2.0,
+                            "new_price_3": plu.price_3.0,
+                        })
+                        .to_string(),
+                    ),
+                    created_at: now,
+                })
+                .await;
+
+            updated_records.push((plu, prev_hash));
+        }
+
+        let mut scale_results = Vec::new();
+        if send_immediately && !updated_records.is_empty() {
+            for scale_id in target_scale_ids {
+                let handle = match self.scales.get(scale_id).await {
+                    Ok(h) => h,
+                    Err(err) => {
+                        scale_results.push(PriceChangeScaleResult {
+                            scale_id,
+                            updated: 0,
+                            failed: updated_records.len(),
+                            error: Some(err.to_string()),
+                        });
+                        continue;
+                    }
+                };
+
+                let allowed_keys: std::collections::HashSet<PluKey> = self
+                    .sync
+                    .effective_catalog_for_scale(self.store_id, scale_id)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|p| p.key)
+                    .collect();
+
+                let mut updated = 0usize;
+                let mut failed = 0usize;
+                let mut last_err = None;
+
+                for (plu, prev_hash) in &updated_records {
+                    if !allowed_keys.contains(&plu.key) {
+                        continue;
+                    }
+                    let res = match handle
+                        .change_price(plu.key, plu.price_1, Some(plu.price_2), Some(plu.price_3))
+                        .await
+                    {
+                        Ok(()) => Ok(()),
+                        Err(AppError::Driver(
+                            openscale_driver::DriverError::NotConnected
+                            | openscale_driver::DriverError::Io(_)
+                            | openscale_driver::DriverError::Timeout,
+                        )) => {
+                            if let Err(e) = handle.connect().await {
+                                Err(e)
+                            } else {
+                                handle
+                                    .change_price(
+                                        plu.key,
+                                        plu.price_1,
+                                        Some(plu.price_2),
+                                        Some(plu.price_3),
+                                    )
+                                    .await
+                            }
+                        }
+                        Err(e) => Err(e),
+                    };
+
+                    match res {
+                        Ok(()) => {
+                            let _ = self
+                                .sync
+                                .record_plu_checksum_if_synced(
+                                    scale_id,
+                                    plu.key,
+                                    prev_hash,
+                                    &plu.delta_hash,
+                                )
+                                .await;
+                            updated += 1;
+                        }
+                        Err(e) => {
+                            last_err = Some(e.to_string());
+                            failed += 1;
+                        }
+                    }
+                }
+
+                scale_results.push(PriceChangeScaleResult {
+                    scale_id,
+                    updated,
+                    failed,
+                    error: last_err,
+                });
+            }
+        }
+
+        Ok(PriceChangeReport {
+            updated_catalog: updated_records.len(),
+            scale_results,
+        })
     }
 
     // --- Master Tables (v0.2) ---

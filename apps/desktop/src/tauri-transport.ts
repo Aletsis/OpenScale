@@ -6,6 +6,8 @@ import type {
   OpenScaleTransport,
   Plu,
   PluKey,
+  PriceChangeItem,
+  PriceChangeReport,
   Scale,
   ScaleEvent,
   ScaleHealthCheckResult,
@@ -109,6 +111,18 @@ export class TauriIpcTransport implements OpenScaleTransport {
     includeDeletes: boolean,
   ): Promise<SyncReport> {
     return invoke<SyncReport>("sync_scale_with_options", { scaleId, mode, includeDeletes });
+  }
+
+  applyPriceChanges(
+    items: PriceChangeItem[],
+    targetScaleIds: string[],
+    sendImmediately: boolean,
+  ): Promise<PriceChangeReport> {
+    return invoke<PriceChangeReport>("apply_price_changes", {
+      items,
+      targetScaleIds,
+      sendImmediately,
+    });
   }
 
   subscribe(listener: (event: ScaleEvent) => void): Unsubscribe {

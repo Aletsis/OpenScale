@@ -14,5 +14,5 @@ pub use import_engine::{
     ScaleImportApplyRequest, ScaleImportPreview, ScaleImportResult,
 };
 pub use scale_manager::{ScaleHandle, ScaleManager};
-pub use service::OpenScaleApp;
+pub use service::{OpenScaleApp, PriceChangeItem, PriceChangeReport, PriceChangeScaleResult};
 pub use sync_engine::{DeltaSyncPreview, SyncEngine, SyncMode, SyncReport};

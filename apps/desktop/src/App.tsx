@@ -29,6 +29,7 @@ import {
   Building2,
   Check,
   Database,
+  DollarSign,
   Download,
   FileCode2,
   Globe,
@@ -60,12 +61,13 @@ import { LabelDesignerView } from "./components/LabelDesignerView.js";
 import { LabelFormatsView } from "./components/LabelFormatsView.js";
 import { MasterTablesView } from "./components/MasterTablesView.js";
 import { PluFormDialog } from "./components/PluFormDialog.js";
+import { PriceChangeView } from "./components/PriceChangeView.js";
 import { SalesReportsView } from "./components/SalesReportsView.js";
 import { ScaleEditDialog } from "./components/ScaleEditDialog.js";
 import { ScaleImportDialog } from "./components/ScaleImportDialog.js";
 import { ServiceConsoleView } from "./components/ServiceConsoleView.js";
 
-type Tab = "scales" | "catalog" | "masterTables" | "reports" | "service" | "labels" | "sync";
+type Tab = "scales" | "catalog" | "priceChange" | "masterTables" | "reports" | "service" | "labels" | "sync";
 
 interface SyncHistoryEntry {
   id: string;
@@ -1310,6 +1312,14 @@ export function App() {
             </span>
           </Button>
           <Button
+            variant={activeTab === "priceChange" ? "default" : "ghost"}
+            className="justify-start"
+            onClick={() => setActiveTab("priceChange")}
+          >
+            <DollarSign className="h-4 w-4" />
+            Cambio de Precio
+          </Button>
+          <Button
             variant={activeTab === "sync" ? "default" : "ghost"}
             className="justify-between"
             onClick={() => setActiveTab("sync")}
@@ -1387,6 +1397,30 @@ export function App() {
 
       <main className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-6xl space-y-6">
+          {activeTab === "priceChange" && (
+            <>
+              <h2 className="text-xl font-semibold tracking-tight">Cambio de Precio</h2>
+              <PriceChangeView
+                plus={allPlus}
+                scales={scales}
+                branches={branches}
+                onUpdated={(summary) => {
+                  void queryClient.invalidateQueries({ queryKey: ["plus"] });
+                  toast({ variant: "success", message: summary });
+                  appendHistory({
+                    operation: "delta",
+                    target: "Cambio de precio",
+                    status: "success",
+                    details: summary,
+                  });
+                }}
+                onError={(msg) =>
+                  toast({ variant: "error", message: t("notifications.error", { message: msg }) })
+                }
+              />
+            </>
+          )}
+
           {activeTab === "masterTables" && (
             <>
               <h2 className="text-xl font-semibold tracking-tight">Master Tables</h2>

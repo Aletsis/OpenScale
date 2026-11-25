@@ -5,6 +5,8 @@ import type {
   ImportSelection,
   Plu,
   PluKey,
+  PriceChangeItem,
+  PriceChangeReport,
   Scale,
   ScaleEvent,
   ScaleHealthCheckResult,
@@ -55,6 +57,11 @@ export interface OpenScaleTransport {
     mode: SyncMode,
     includeDeletes: boolean,
   ): Promise<SyncReport>;
+  applyPriceChanges?(
+    items: PriceChangeItem[],
+    targetScaleIds: string[],
+    sendImmediately: boolean,
+  ): Promise<PriceChangeReport>;
 
   // Real-time events
   subscribe(listener: (event: ScaleEvent) => void): Unsubscribe;
