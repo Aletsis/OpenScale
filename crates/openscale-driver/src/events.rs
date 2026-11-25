@@ -81,4 +81,10 @@ pub enum ScaleEvent {
         scale_id: Uuid,
         frame: LcdFrame,
     },
+    IdentityConflict {
+        scale_id: Uuid,
+        ip_address: String,
+        expected_serial: String,
+        actual_serial: String,
+    },
 }

@@ -23,6 +23,10 @@ pub struct ScaleHealthCheckResult {
     pub last_seen_at: Option<DateTime<Utc>>,
     pub checked_at: DateTime<Utc>,
     pub error: Option<String>,
+    #[serde(default)]
+    pub detected_serial: Option<String>,
+    #[serde(default)]
+    pub identity_conflict: Option<String>,
 }
 
 /// Checks a single scale's live network reachability, persists its status in SQLite,
@@ -48,27 +52,84 @@ pub async fn check_scale_health(
 
     match handle.health_check().await {
         Ok(()) => {
+            let mut detected_serial: Option<String> = None;
+            let mut identity_conflict: Option<String> = None;
+
+            // Verify physical identity (serial number / MAC) when missing or on status transition.
+            if (scale.serial_number.is_none() || previous_status != ScaleStatus::Online)
+                && let Ok(info) = handle.get_info().await
+            {
+                detected_serial = info
+                    .serial_number
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+
+                if let Some(ref actual_sn) = detected_serial {
+                    match scale
+                        .serial_number
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        Some(expected_sn) if !expected_sn.eq_ignore_ascii_case(actual_sn) => {
+                            let msg = format!(
+                                "IP {} pertenece a serie {} pero respondió serie {}",
+                                scale.ip_address, expected_sn, actual_sn
+                            );
+                            identity_conflict = Some(msg);
+                            app.scales.emit_identity_conflict(
+                                scale_id,
+                                scale.ip_address.clone(),
+                                expected_sn.to_string(),
+                                actual_sn.clone(),
+                            );
+                        }
+                        None => {
+                            // Backfill missing serial/MAC automatically once discovered
+                            let mut updated = scale.clone();
+                            updated.serial_number = Some(actual_sn.clone());
+                            if updated.mac_address.is_none() {
+                                updated.mac_address = info.mac_address.clone();
+                            }
+                            updated.meta.updated_at = checked_at;
+                            let _ = app.scale_repo().upsert(&updated).await;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            let next_status = if identity_conflict.is_some() {
+                ScaleStatus::Error
+            } else {
+                ScaleStatus::Online
+            };
+
             app.scale_repo()
-                .update_status(
-                    app.store_id,
-                    scale_id,
-                    ScaleStatus::Online,
-                    Some(checked_at),
-                )
+                .update_status(app.store_id, scale_id, next_status, Some(checked_at))
                 .await?;
 
-            if previous_status != ScaleStatus::Online {
+            if previous_status != next_status {
+                let conn_state = if next_status == ScaleStatus::Error {
+                    ConnectionState::Error
+                } else {
+                    ConnectionState::Connected
+                };
                 app.scales
-                    .emit_connection_changed(scale_id, ConnectionState::Connected, None);
+                    .emit_connection_changed(scale_id, conn_state, identity_conflict.clone());
             }
 
             Ok(ScaleHealthCheckResult {
                 scale_id,
                 previous_status,
-                status: ScaleStatus::Online,
+                status: next_status,
                 last_seen_at: Some(checked_at),
                 checked_at,
-                error: None,
+                error: identity_conflict.clone(),
+                detected_serial,
+                identity_conflict,
             })
         }
         Err(err) => {
@@ -92,6 +153,8 @@ pub async fn check_scale_health(
                 last_seen_at: scale.last_seen_at,
                 checked_at,
                 error: Some(error_msg),
+                detected_serial: None,
+                identity_conflict: None,
             })
         }
     }

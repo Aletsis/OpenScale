@@ -22,6 +22,7 @@ enum ScaleCommand {
     Connect(oneshot::Sender<Result<ScaleInfo, DriverError>>),
     Disconnect(oneshot::Sender<Result<(), DriverError>>),
     Ping(oneshot::Sender<Result<(), DriverError>>),
+    GetInfo(oneshot::Sender<Result<ScaleInfo, DriverError>>),
     HealthCheck(oneshot::Sender<Result<(), DriverError>>),
     GetDateTime(oneshot::Sender<Result<ScaleDateTime, DriverError>>),
     SetDateTime(ScaleDateTime, oneshot::Sender<Result<(), DriverError>>),
@@ -95,6 +96,15 @@ impl ScaleHandle {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(ScaleCommand::Ping(tx))
+            .await
+            .map_err(|_| AppError::ActorUnavailable)?;
+        Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
+    }
+
+    pub async fn get_info(&self) -> Result<ScaleInfo, AppError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(ScaleCommand::GetInfo(tx))
             .await
             .map_err(|_| AppError::ActorUnavailable)?;
         Ok(rx.await.map_err(|_| AppError::ActorUnavailable)??)
@@ -355,6 +365,21 @@ impl ScaleManager {
         });
     }
 
+    pub fn emit_identity_conflict(
+        &self,
+        scale_id: Uuid,
+        ip_address: String,
+        expected_serial: String,
+        actual_serial: String,
+    ) {
+        let _ = self.events.send(ScaleEvent::IdentityConflict {
+            scale_id,
+            ip_address,
+            expected_serial,
+            actual_serial,
+        });
+    }
+
     /// Registers a scale using its protocol family's real TCP driver (`XS` or `XTi`).
     pub async fn register_scale(&self, scale: &Scale) -> ScaleHandle {
         let driver: Box<dyn ScaleDriver> = match scale.family {
@@ -449,6 +474,9 @@ async fn run_scale_actor(
             }
             ScaleCommand::Ping(reply) => {
                 let _ = reply.send(driver.ping().await);
+            }
+            ScaleCommand::GetInfo(reply) => {
+                let _ = reply.send(driver.get_info().await);
             }
             ScaleCommand::HealthCheck(reply) => {
                 let res = match driver.ping().await {

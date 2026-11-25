@@ -2,6 +2,7 @@ import type {
   Branch,
   DeltaSyncPreview,
   DiscoveredScale,
+  DiscoveredScaleMatch,
   ImportSelection,
   Plu,
   PluKey,
@@ -34,6 +35,9 @@ export interface OpenScaleTransport {
 
   // Scales
   discoverScales(): Promise<DiscoveredScale[]>;
+  discoverScalesWithIdentity?(): Promise<DiscoveredScaleMatch[]>;
+  reassignScaleIp?(scaleId: string, newIp: string): Promise<Scale>;
+  swapScaleIps?(scaleAId: string, scaleBId: string): Promise<[Scale, Scale]>;
   listScales(): Promise<Scale[]>;
   upsertScale(scale: Scale): Promise<Scale>;
   deleteScale(scaleId: string): Promise<boolean>;

@@ -22,6 +22,7 @@ use crate::health_monitor::{
     check_scale_health as check_scale_health_impl,
     start_health_monitor as start_health_monitor_impl,
 };
+use crate::identity::{DiscoveredScaleMatch, classify_discovered_scales};
 use crate::import_engine::{
     ImportSelection, ScaleImportApplyRequest, ScaleImportPreview, ScaleImportResult,
     apply_scale_import as apply_scale_import_impl,
@@ -104,6 +105,63 @@ impl OpenScaleApp {
         timeout: Duration,
     ) -> Result<Vec<DiscoveredScale>, AppError> {
         discover_all_scales(timeout, &[], &[]).await
+    }
+
+    pub async fn discover_scales_with_identity(
+        &self,
+        timeout: Duration,
+    ) -> Result<Vec<DiscoveredScaleMatch>, AppError> {
+        let found = discover_all_scales(timeout, &[], &[]).await?;
+        let registered = self.list_scales().await?;
+        Ok(classify_discovered_scales(&found, &registered))
+    }
+
+    /// Updates a scale's IP address (e.g. after DHCP change) while preserving its ID,
+    /// history, and `scale_plu_checksums`, and restarts its TCP actor.
+    pub async fn reassign_scale_ip(
+        &self,
+        scale_id: Uuid,
+        new_ip: String,
+    ) -> Result<Scale, AppError> {
+        let mut scale = self
+            .scale_repo()
+            .get_by_id(self.store_id, scale_id)
+            .await?
+            .ok_or(AppError::ScaleNotRegistered(scale_id))?;
+        scale.ip_address = new_ip.trim().to_string();
+        scale.meta.updated_at = Utc::now();
+        self.scale_repo().upsert(&scale).await?;
+        self.scales.register_scale(&scale).await;
+        Ok(scale)
+    }
+
+    /// Swaps IP addresses between two registered scales and restarts both TCP actors.
+    pub async fn swap_scale_ips(
+        &self,
+        scale_a_id: Uuid,
+        scale_b_id: Uuid,
+    ) -> Result<(Scale, Scale), AppError> {
+        let mut a = self
+            .scale_repo()
+            .get_by_id(self.store_id, scale_a_id)
+            .await?
+            .ok_or(AppError::ScaleNotRegistered(scale_a_id))?;
+        let mut b = self
+            .scale_repo()
+            .get_by_id(self.store_id, scale_b_id)
+            .await?
+            .ok_or(AppError::ScaleNotRegistered(scale_b_id))?;
+
+        std::mem::swap(&mut a.ip_address, &mut b.ip_address);
+        let now = Utc::now();
+        a.meta.updated_at = now;
+        b.meta.updated_at = now;
+
+        self.scale_repo().upsert(&a).await?;
+        self.scale_repo().upsert(&b).await?;
+        self.scales.register_scale(&a).await;
+        self.scales.register_scale(&b).await;
+        Ok((a, b))
     }
 
     pub async fn list_branches(&self) -> Result<Vec<Branch>, AppError> {

@@ -2,6 +2,7 @@ import type {
   Branch,
   DeltaSyncPreview,
   DiscoveredScale,
+  DiscoveredScaleMatch,
   ImportSelection,
   OpenScaleTransport,
   Plu,
@@ -47,6 +48,18 @@ export class TauriIpcTransport implements OpenScaleTransport {
 
   discoverScales(): Promise<DiscoveredScale[]> {
     return invoke<DiscoveredScale[]>("discover_scales");
+  }
+
+  discoverScalesWithIdentity(): Promise<DiscoveredScaleMatch[]> {
+    return invoke<DiscoveredScaleMatch[]>("discover_scales_with_identity");
+  }
+
+  reassignScaleIp(scaleId: string, newIp: string): Promise<Scale> {
+    return invoke<Scale>("reassign_scale_ip", { scaleId, newIp });
+  }
+
+  swapScaleIps(scaleAId: string, scaleBId: string): Promise<[Scale, Scale]> {
+    return invoke<[Scale, Scale]>("swap_scale_ips", { scaleAId, scaleBId });
   }
 
   listScales(): Promise<Scale[]> {

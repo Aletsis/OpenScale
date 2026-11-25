@@ -1,6 +1,7 @@
 import {
   type Branch,
   type DiscoveredScale,
+  type DiscoveredScaleMatch,
   type Plu,
   type PluKey,
   type Scale,
@@ -25,6 +26,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
   Activity,
+  AlertTriangle,
+  ArrowLeftRight,
   BarChart3,
   Barcode,
   Building2,
@@ -149,6 +152,8 @@ export function App() {
     document.documentElement.classList.contains("dark"),
   );
   const [discovered, setDiscovered] = useState<DiscoveredScale[]>([]);
+  const [identityAlerts, setIdentityAlerts] = useState<DiscoveredScaleMatch[]>([]);
+  const [liveIdentityConflicts, setLiveIdentityConflicts] = useState<Record<string, string>>({});
   const [syncHistory, setSyncHistory] = useState<SyncHistoryEntry[]>(() => loadSyncHistory());
   const [importDialogScale, setImportDialogScale] = useState<Scale | null>(null);
   const [importDialogFromSave, setImportDialogFromSave] = useState(false);
@@ -287,6 +292,19 @@ export function App() {
 
   useEffect(() => {
     return transport.subscribe((event) => {
+      if (event.type === "identity_conflict") {
+        const msg = `Conflicto de identidad en ${event.ip_address}: se esperaba S/N ${event.expected_serial} pero respondió S/N ${event.actual_serial}`;
+        setLiveIdentityConflicts((prev) => ({ ...prev, [event.scale_id]: msg }));
+        toast({ variant: "error", message: msg });
+        appendHistory({
+          operation: "connection",
+          target: event.ip_address,
+          status: "error",
+          details: msg,
+        });
+        void queryClient.invalidateQueries({ queryKey: ["scales"] });
+        return;
+      }
       if (event.type !== "connection_changed") {
         return;
       }
@@ -376,18 +394,38 @@ export function App() {
   });
 
   const discoverMutation = useMutation({
-    mutationFn: () => transport.discoverScales(),
-    onSuccess: (items) => {
-      const newItems = items.filter((item) => !isScaleRegistered(item, scales));
-      const existingCount = items.length - newItems.length;
+    mutationFn: async (): Promise<DiscoveredScaleMatch[]> => {
+      if (transport.discoverScalesWithIdentity) {
+        return transport.discoverScalesWithIdentity();
+      }
+      const raw = await transport.discoverScales();
+      return raw.map((item) => ({
+        discovered: item,
+        identity: isScaleRegistered(item, scales)
+          ? { kind: "matched" as const, scale_id: "", scale_name: "" }
+          : { kind: "new_scale" as const },
+      }));
+    },
+    onSuccess: (matches) => {
+      const newItems = matches
+        .filter((m) => m.identity.kind === "new_scale")
+        .map((m) => m.discovered);
+      const alerts = matches.filter(
+        (m) => m.identity.kind === "ip_changed" || m.identity.kind === "ip_taken_by_other_scale",
+      );
+      const existingCount = matches.filter((m) => m.identity.kind === "matched").length;
       setDiscovered(newItems);
+      setIdentityAlerts(alerts);
 
       let message: string;
-      let variant: "success" | "info" = "info";
-      if (items.length === 0) {
+      let variant: "success" | "info" | "warning" = "info";
+      if (alerts.length > 0) {
+        variant = "warning";
+        message = `Descubrimiento LAN: ${alerts.length} alerta(s) de cambio/conflicto de IP y ${newItems.length} báscula(s) nueva(s).`;
+      } else if (matches.length === 0) {
         message = t("notifications.lanNone");
       } else if (newItems.length === 0) {
-        message = t("notifications.lanAllRegistered", { count: items.length });
+        message = t("notifications.lanAllRegistered", { count: matches.length });
       } else if (existingCount > 0) {
         variant = "success";
         message = t("notifications.lanFoundFiltered", {
@@ -403,7 +441,7 @@ export function App() {
       appendHistory({
         operation: "discover",
         target: "LAN",
-        status: "success",
+        status: alerts.length > 0 ? "warning" : "success",
         details: message,
       });
     },
@@ -535,6 +573,53 @@ export function App() {
         variant: "error",
         message: t("notifications.error", { message: String(err) }),
       });
+    }
+  };
+
+  const handleReassignScaleIp = async (scaleId: string, newIp: string, scaleName: string) => {
+    if (!transport.reassignScaleIp) {
+      return;
+    }
+    try {
+      await transport.reassignScaleIp(scaleId, newIp);
+      setIdentityAlerts((prev) =>
+        prev.filter((m) => !(m.identity.kind === "ip_changed" && m.identity.scale_id === scaleId)),
+      );
+      setLiveIdentityConflicts((prev) => {
+        const next = { ...prev };
+        delete next[scaleId];
+        return next;
+      });
+      await queryClient.invalidateQueries({ queryKey: ["scales"] });
+      toast({
+        variant: "success",
+        message: `IP de "${scaleName}" actualizada a ${newIp}.`,
+      });
+    } catch (err) {
+      toast({ variant: "error", message: t("notifications.error", { message: String(err) }) });
+    }
+  };
+
+  const handleSwapScaleIps = async (scaleAId: string, scaleBId: string) => {
+    if (!transport.swapScaleIps) {
+      return;
+    }
+    try {
+      await transport.swapScaleIps(scaleAId, scaleBId);
+      setIdentityAlerts((prev) =>
+        prev.filter(
+          (m) =>
+            !(
+              m.identity.kind === "ip_taken_by_other_scale" &&
+              (m.identity.existing_scale_id === scaleAId ||
+                m.identity.other_registered_scale_id === scaleBId)
+            ),
+        ),
+      );
+      await queryClient.invalidateQueries({ queryKey: ["scales"] });
+      toast({ variant: "success", message: "IPs intercambiadas correctamente entre ambas básculas." });
+    } catch (err) {
+      toast({ variant: "error", message: t("notifications.error", { message: String(err) }) });
     }
   };
 
@@ -931,6 +1016,15 @@ export function App() {
       header: t("scales.columns.ip"),
       cell: ({ getValue }) => (
         <span className="font-mono text-xs tabular-nums">{getValue<string>()}</span>
+      ),
+    },
+    {
+      accessorKey: "serial_number",
+      header: "Serie",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs text-muted-foreground tabular-nums">
+          {getValue<string | null>() ?? "—"}
+        </span>
       ),
     },
     {
@@ -1586,6 +1680,111 @@ export function App() {
                   </p>
                 </div>
               </div>
+
+              {(identityAlerts.length > 0 || Object.keys(liveIdentityConflicts).length > 0) && (
+                <section className="space-y-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-300">
+                      <AlertTriangle className="h-4 w-4" />
+                      Alertas de Identidad (Número de Serie / IP)
+                    </h3>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setIdentityAlerts([]);
+                        setLiveIdentityConflicts({});
+                      }}
+                    >
+                      Descartar
+                    </Button>
+                  </div>
+                  <div className="space-y-2 text-xs">
+                    {identityAlerts.map((match, idx) => {
+                      const id = match.identity;
+                      if (id.kind === "ip_changed") {
+                        return (
+                          <div
+                            key={`ip-changed-${id.scale_id}-${idx}`}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2"
+                          >
+                            <div>
+                              <span className="font-semibold text-foreground">{id.scale_name}</span>{" "}
+                              <span className="text-muted-foreground">
+                                (S/N <code className="font-mono">{id.serial_number ?? "—"}</code>)
+                                cambió de IP:{" "}
+                                <code className="font-mono">{id.previous_ip}</code> →{" "}
+                                <code className="font-mono font-semibold text-primary">
+                                  {id.new_ip}
+                                </code>
+                              </span>
+                            </div>
+                            <Button
+                              size="sm"
+                              onClick={() =>
+                                void handleReassignScaleIp(id.scale_id, id.new_ip, id.scale_name)
+                              }
+                            >
+                              Actualizar IP
+                            </Button>
+                          </div>
+                        );
+                      }
+                      if (id.kind === "ip_taken_by_other_scale") {
+                        return (
+                          <div
+                            key={`ip-conflict-${id.existing_scale_id}-${idx}`}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 bg-card px-3 py-2"
+                          >
+                            <div>
+                              <span className="font-semibold text-destructive">
+                                Conflicto en IP {id.ip_address}:
+                              </span>{" "}
+                              registrada para{" "}
+                              <strong>{id.existing_scale_name}</strong> (S/N{" "}
+                              <code className="font-mono">{id.expected_serial ?? "—"}</code>), pero
+                              respondió S/N{" "}
+                              <code className="font-mono font-semibold">
+                                {id.actual_serial ?? "desconocido"}
+                              </code>
+                              {id.other_registered_scale_name
+                                ? ` (${id.other_registered_scale_name})`
+                                : " (báscula no registrada)"}
+                              .
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              {id.other_registered_scale_id && (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() =>
+                                    void handleSwapScaleIps(
+                                      id.existing_scale_id,
+                                      id.other_registered_scale_id as string,
+                                    )
+                                  }
+                                >
+                                  <ArrowLeftRight className="h-3.5 w-3.5" />
+                                  Intercambiar IPs
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })}
+                    {Object.entries(liveIdentityConflicts).map(([scaleId, msg]) => (
+                      <div
+                        key={`live-conflict-${scaleId}`}
+                        className="flex items-center justify-between gap-2 rounded-md border border-destructive/40 bg-card px-3 py-2 text-destructive"
+                      >
+                        <span>{msg}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               {unregisteredDiscovered.length > 0 && (
                 <section className="space-y-2.5">

@@ -68,6 +68,34 @@ export interface DiscoveredScale {
   firmware_version: string | null;
 }
 
+export type ScaleIdentityStatus =
+  | { kind: "new_scale" }
+  | { kind: "matched"; scale_id: string; scale_name: string }
+  | {
+      kind: "ip_changed";
+      scale_id: string;
+      scale_name: string;
+      previous_ip: string;
+      new_ip: string;
+      serial_number: string | null;
+      mac_address: string | null;
+    }
+  | {
+      kind: "ip_taken_by_other_scale";
+      existing_scale_id: string;
+      existing_scale_name: string;
+      expected_serial: string | null;
+      actual_serial: string | null;
+      ip_address: string;
+      other_registered_scale_id: string | null;
+      other_registered_scale_name: string | null;
+    };
+
+export interface DiscoveredScaleMatch {
+  discovered: DiscoveredScale;
+  identity: ScaleIdentityStatus;
+}
+
 export interface DriverCapabilities {
   supports_fast_price_change: boolean;
   supports_service_port: boolean;
@@ -128,6 +156,13 @@ export type ScaleEvent =
       type: "live_weight_updated";
       scale_id: string;
       weight: LiveWeight;
+    }
+  | {
+      type: "identity_conflict";
+      scale_id: string;
+      ip_address: string;
+      expected_serial: string;
+      actual_serial: string;
     };
 
 export interface ScaleHealthCheckResult {
@@ -137,6 +172,8 @@ export interface ScaleHealthCheckResult {
   last_seen_at: string | null;
   checked_at: string;
   error: string | null;
+  detected_serial?: string | null;
+  identity_conflict?: string | null;
 }
 
 export type SyncMode = "delta" | "full";

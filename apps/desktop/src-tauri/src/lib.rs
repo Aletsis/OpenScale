@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use openscale_app::{
-    DEFAULT_HEALTH_CHECK_INTERVAL, DeltaSyncPreview, ImportSelection, OpenScaleApp,
-    PriceChangeItem, PriceChangeReport, ScaleHealthCheckResult, ScaleImportApplyRequest,
-    ScaleImportPreview, ScaleImportResult, SyncMode, SyncReport,
+    DEFAULT_HEALTH_CHECK_INTERVAL, DeltaSyncPreview, DiscoveredScaleMatch, ImportSelection,
+    OpenScaleApp, PriceChangeItem, PriceChangeReport, ScaleHealthCheckResult,
+    ScaleImportApplyRequest, ScaleImportPreview, ScaleImportResult, SyncMode, SyncReport,
 };
 use openscale_domain::{
     BarcodeFormat, Branch, Department, LabelFormat, Plu, PluKey, SalesSnapshot, Scale,
@@ -78,6 +78,43 @@ async fn discover_scales(state: State<'_, DesktopState>) -> Result<Vec<Discovere
     state
         .app
         .discover_scales(Duration::from_secs(2))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn discover_scales_with_identity(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<DiscoveredScaleMatch>, String> {
+    state
+        .app
+        .discover_scales_with_identity(Duration::from_secs(2))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn reassign_scale_ip(
+    state: State<'_, DesktopState>,
+    scale_id: Uuid,
+    new_ip: String,
+) -> Result<Scale, String> {
+    state
+        .app
+        .reassign_scale_ip(scale_id, new_ip)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn swap_scale_ips(
+    state: State<'_, DesktopState>,
+    scale_a_id: Uuid,
+    scale_b_id: Uuid,
+) -> Result<(Scale, Scale), String> {
+    state
+        .app
+        .swap_scale_ips(scale_a_id, scale_b_id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -718,6 +755,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             discover_scales,
+            discover_scales_with_identity,
+            reassign_scale_ip,
+            swap_scale_ips,
             list_branches,
             upsert_branch,
             delete_branch,
