@@ -42,8 +42,7 @@ export function installGlobalErrorHandlers(): void {
       ? `${event.filename}:${event.lineno}:${event.colno}`
       : undefined;
     const err = event.error;
-    const message =
-      err instanceof Error ? err.message : event.message || "Uncaught window error";
+    const message = err instanceof Error ? err.message : event.message || "Uncaught window error";
     const stack = err instanceof Error ? err.stack : undefined;
     logFrontendEvent("ERROR", "window.error", message, stack, location);
   });
@@ -51,12 +50,7 @@ export function installGlobalErrorHandlers(): void {
   window.addEventListener("unhandledrejection", (event) => {
     const reason = event.reason;
     if (reason instanceof Error) {
-      logFrontendEvent(
-        "ERROR",
-        "unhandledrejection",
-        reason.message || reason.name,
-        reason.stack,
-      );
+      logFrontendEvent("ERROR", "unhandledrejection", reason.message || reason.name, reason.stack);
     } else {
       logFrontendEvent("ERROR", "unhandledrejection", String(reason));
     }

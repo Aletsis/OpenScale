@@ -142,6 +142,10 @@ pub async fn check_scale_health(
         }
         Err(err) => {
             let error_msg = err.to_string();
+            app.scale_repo()
+                .update_status(app.store_id, scale_id, ScaleStatus::Offline, None)
+                .await?;
+
             if previous_status != ScaleStatus::Offline {
                 tracing::warn!(
                     scale_id = %scale_id,
@@ -153,12 +157,6 @@ pub async fn check_scale_health(
                     error_debug = ?err,
                     "Scale became offline during health check"
                 );
-            }
-            app.scale_repo()
-                .update_status(app.store_id, scale_id, ScaleStatus::Offline, None)
-                .await?;
-
-            if previous_status != ScaleStatus::Offline {
                 app.scales.emit_connection_changed(
                     scale_id,
                     ConnectionState::Disconnected,

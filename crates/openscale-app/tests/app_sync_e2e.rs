@@ -1046,3 +1046,268 @@ async fn list_and_write_scale_label_formats_e2e() {
 
     app.scales.unregister(scale_id).await;
 }
+
+#[derive(Default)]
+struct FaultySyncState {
+    connect_outcomes: std::collections::VecDeque<Result<(), &'static str>>,
+    upsert_outcomes: std::collections::VecDeque<Result<(), DriverError>>,
+    delete_outcomes: std::collections::VecDeque<Result<(), DriverError>>,
+    serial_number: Option<String>,
+}
+
+struct FaultyScaleDriver {
+    state: Arc<Mutex<FaultySyncState>>,
+}
+
+#[async_trait]
+impl ScaleDriver for FaultyScaleDriver {
+    fn capabilities(&self) -> DriverCapabilities {
+        DriverCapabilities::xs_default()
+    }
+
+    async fn connect(&mut self) -> Result<ScaleInfo, DriverError> {
+        let mut st = self.state.lock().unwrap();
+        if let Some(Err(msg)) = st.connect_outcomes.pop_front() {
+            return Err(DriverError::ConnectionFailed(msg.to_string()));
+        }
+        Ok(ScaleInfo {
+            family: ScaleFamily::AveryBerkelXs,
+            model: "XS200".to_string(),
+            serial_number: st.serial_number.clone(),
+            firmware_version: "4.1.7.0".to_string(),
+            protocol_version: Some("8000".to_string()),
+            mac_address: None,
+            requires_auth: false,
+        })
+    }
+
+    async fn disconnect(&mut self) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn ping(&mut self) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn get_info(&mut self) -> Result<ScaleInfo, DriverError> {
+        self.connect().await
+    }
+
+    async fn get_datetime(&mut self) -> Result<ScaleDateTime, DriverError> {
+        Err(DriverError::Unsupported("get_datetime"))
+    }
+
+    async fn set_datetime(&mut self, _dt: ScaleDateTime) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn read_plu(&mut self, _key: PluKey) -> Result<Option<Plu>, DriverError> {
+        Ok(None)
+    }
+
+    async fn list_plus(
+        &mut self,
+        _from: Option<PluKey>,
+        _to: Option<PluKey>,
+    ) -> Result<Vec<Plu>, DriverError> {
+        Ok(vec![])
+    }
+
+    async fn count_plus(&mut self) -> Result<u64, DriverError> {
+        Ok(0)
+    }
+
+    async fn upsert_plu(&mut self, _plu: &Plu) -> Result<(), DriverError> {
+        self.state
+            .lock()
+            .unwrap()
+            .upsert_outcomes
+            .pop_front()
+            .unwrap_or(Ok(()))
+    }
+
+    async fn change_price(
+        &mut self,
+        _key: PluKey,
+        _p1: MoneyCents,
+        _p2: Option<MoneyCents>,
+        _p3: Option<MoneyCents>,
+    ) -> Result<(), DriverError> {
+        Ok(())
+    }
+
+    async fn delete_plu(&mut self, _key: PluKey) -> Result<(), DriverError> {
+        self.state
+            .lock()
+            .unwrap()
+            .delete_outcomes
+            .pop_front()
+            .unwrap_or(Ok(()))
+    }
+}
+
+#[tokio::test]
+async fn sync_handles_transient_retries_and_failures_for_upserts_and_deletes() {
+    let db = Database::connect_in_memory().await.unwrap();
+    let app = OpenScaleApp::new(db);
+    let scale_id = new_id();
+    let scale = Scale {
+        id: scale_id,
+        name: "Báscula Faulty".to_string(),
+        family: ScaleFamily::AveryBerkelXs,
+        ip_address: "192.168.1.98".to_string(),
+        data_port: 3001,
+        service_port: Some(28822),
+        branch_id: None,
+        group_id: None,
+        model: None,
+        serial_number: Some("SN-OK".to_string()),
+        mac_address: None,
+        firmware_version: None,
+        status: ScaleStatus::Online,
+        last_seen_at: None,
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    };
+    app.scale_repo().upsert(&scale).await.unwrap();
+
+    let p1 = sample_plu(1, "PLU RETRY OK", 1000);
+    let p2 = sample_plu(2, "PLU RECONNECT FAIL", 2000);
+    let p3 = sample_plu(3, "PLU RETRY FAIL", 3000);
+    let p4 = sample_plu(4, "PLU PROTOCOL FAIL", 4000);
+    for p in [&p1, &p2, &p3, &p4] {
+        app.upsert_plu(p.clone()).await.unwrap();
+    }
+
+    let state = Arc::new(Mutex::new(FaultySyncState {
+        connect_outcomes: std::collections::VecDeque::from([
+            Ok(()),                    // p1 reconnect succeeds
+            Err("connection refused"), // p2 reconnect fails
+            Ok(()),                    // p3 reconnect succeeds
+        ]),
+        upsert_outcomes: std::collections::VecDeque::from([
+            Err(DriverError::Timeout),      // p1 first attempt transient
+            Ok(()),                         // p1 retry succeeds
+            Err(DriverError::NotConnected), // p2 transient, reconnect fails
+            Err(DriverError::Timeout),      // p3 first attempt transient
+            Err(DriverError::Protocol {
+                code: Some(99),
+                message: "retry rejected".to_string(),
+            }), // p3 retry fails
+            Err(DriverError::Protocol {
+                code: Some(42),
+                message: "invalid plu".to_string(),
+            }), // p4 non-transient failure
+        ]),
+        delete_outcomes: std::collections::VecDeque::new(),
+        serial_number: Some("SN-OK".to_string()),
+    }));
+
+    app.scales
+        .register_driver(
+            scale_id,
+            Box::new(FaultyScaleDriver {
+                state: Arc::clone(&state),
+            }),
+        )
+        .await;
+
+    let report = app
+        .sync_scale_with_options(scale_id, SyncMode::Delta, false)
+        .await
+        .unwrap();
+    assert_eq!(report.total_catalog_plus, 4);
+    assert_eq!(report.sent_plus, 1);
+    assert_eq!(report.failed_plus, 3);
+    assert_eq!(report.deleted_plus, 0);
+
+    // Sync p2 and p3 cleanly so we have 3 synced PLUs (p1, p2, p3) to test delete error paths
+    let ok_report = app
+        .sync_scale_with_options(scale_id, SyncMode::Delta, false)
+        .await
+        .unwrap();
+    assert_eq!(ok_report.sent_plus, 3);
+    assert_eq!(ok_report.failed_plus, 0);
+
+    // Remove p1, p2, p3, p4 locally and exercise delete retry success, reconnect fail, and protocol fail
+    for p in [&p1, &p2, &p3, &p4] {
+        app.delete_plu(p.key).await.unwrap();
+    }
+    {
+        let mut st = state.lock().unwrap();
+        st.connect_outcomes = std::collections::VecDeque::from([
+            Ok(()),           // delete 1 reconnect succeeds
+            Err("host down"), // delete 2 reconnect fails
+        ]);
+        st.delete_outcomes = std::collections::VecDeque::from([
+            Err(DriverError::Timeout),      // delete 1 transient
+            Ok(()),                         // delete 1 retry succeeds
+            Err(DriverError::NotConnected), // delete 2 transient, reconnect fails
+            Err(DriverError::Protocol {
+                code: Some(50),
+                message: "delete rejected".to_string(),
+            }), // delete 3 non-transient failure
+            Ok(()),                         // delete 4 succeeds directly
+        ]);
+    }
+
+    let del_report = app
+        .sync_scale_with_options(scale_id, SyncMode::Delta, true)
+        .await
+        .unwrap();
+    assert_eq!(del_report.deleted_plus, 2);
+    assert_eq!(del_report.failed_plus, 2);
+
+    app.scales.unregister(scale_id).await;
+}
+
+#[tokio::test]
+async fn health_monitor_detects_identity_conflict() {
+    let db = Database::connect_in_memory().await.unwrap();
+    let app = OpenScaleApp::new(db);
+    let scale_id = new_id();
+
+    let scale = Scale {
+        id: scale_id,
+        name: "Báscula Carnicería".to_string(),
+        family: ScaleFamily::AveryBerkelXs,
+        ip_address: "192.168.1.99".to_string(),
+        data_port: 3001,
+        service_port: Some(28822),
+        branch_id: None,
+        group_id: None,
+        model: None,
+        serial_number: Some("SN-EXPECTED".to_string()),
+        mac_address: None,
+        firmware_version: None,
+        status: ScaleStatus::Offline,
+        last_seen_at: None,
+        meta: SyncMetadata::new(DEFAULT_LOCAL_STORE_ID),
+    };
+    app.scale_repo().upsert(&scale).await.unwrap();
+
+    let state = Arc::new(Mutex::new(FaultySyncState {
+        serial_number: Some("SN-OTHER".to_string()),
+        ..Default::default()
+    }));
+    app.scales
+        .register_driver(scale_id, Box::new(FaultyScaleDriver { state }))
+        .await;
+
+    let mut events = app.scales.subscribe();
+    let res = app.check_scale_health(scale_id).await.unwrap();
+    assert_eq!(res.status, ScaleStatus::Error);
+    assert_eq!(res.detected_serial.as_deref(), Some("SN-OTHER"));
+    assert!(res.identity_conflict.is_some());
+
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        ScaleEvent::IdentityConflict {
+            scale_id: id,
+            expected_serial,
+            actual_serial,
+            ..
+        } if id == scale_id && expected_serial == "SN-EXPECTED" && actual_serial == "SN-OTHER"
+    ));
+
+    app.scales.unregister(scale_id).await;
+}

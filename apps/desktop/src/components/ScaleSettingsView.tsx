@@ -556,9 +556,7 @@ export function ScaleSettingsView({ scales, branches, storeId, onStatus }: Scale
                 min={5}
                 max={300}
                 value={healthIntervalSecs}
-                onChange={(ev) =>
-                  setHealthIntervalSecs(Math.max(5, Number(ev.target.value) || 15))
-                }
+                onChange={(ev) => setHealthIntervalSecs(Math.max(5, Number(ev.target.value) || 15))}
                 className="rounded border border-border bg-background px-2.5 py-1.5 font-mono"
               />
             </label>
@@ -579,9 +577,7 @@ export function ScaleSettingsView({ scales, branches, storeId, onStatus }: Scale
                 onChange={(ev) => setBlockSyncOnIdentityConflict(ev.target.checked)}
                 className="h-4 w-4 accent-primary"
               />
-              <span className="text-xs">
-                Bloquear sync automático si hay conflicto de IP/Serie
-              </span>
+              <span className="text-xs">Bloquear sync automático si hay conflicto de IP/Serie</span>
             </label>
           </div>
 

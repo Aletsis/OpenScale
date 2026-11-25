@@ -202,12 +202,8 @@ impl SyncEngine {
                 continue;
             }
 
-            match handle.upsert_plu(plu.clone()).await {
-                Ok(()) => {
-                    self.record_checksum(scale_id, plu.key, &plu.delta_hash, &now)
-                        .await?;
-                    sent_plus += 1;
-                }
+            let upsert_res = match handle.upsert_plu(plu.clone()).await {
+                Ok(()) => Ok(()),
                 Err(
                     first_err @ AppError::Driver(
                         openscale_driver::DriverError::NotConnected
@@ -223,36 +219,18 @@ impl SyncEngine {
                         "Transient driver error during PLU sync; reconnecting and retrying"
                     );
                     match handle.connect().await {
-                        Ok(_) => match handle.upsert_plu(plu.clone()).await {
-                            Ok(()) => {
-                                self.record_checksum(scale_id, plu.key, &plu.delta_hash, &now)
-                                    .await?;
-                                sent_plus += 1;
-                            }
-                            Err(retry_err) => {
-                                tracing::error!(
-                                    scale_id = %scale_id,
-                                    did = plu.key.did,
-                                    plu = plu.key.plu,
-                                    error = %retry_err,
-                                    error_debug = ?retry_err,
-                                    "PLU sync failed after reconnect retry"
-                                );
-                                failed_plus += 1;
-                            }
-                        },
-                        Err(connect_err) => {
-                            tracing::error!(
-                                scale_id = %scale_id,
-                                did = plu.key.did,
-                                plu = plu.key.plu,
-                                error = %connect_err,
-                                error_debug = ?connect_err,
-                                "Scale reconnect failed during PLU sync"
-                            );
-                            failed_plus += 1;
-                        }
+                        Ok(_) => handle.upsert_plu(plu.clone()).await,
+                        Err(connect_err) => Err(connect_err),
                     }
+                }
+                Err(err) => Err(err),
+            };
+
+            match upsert_res {
+                Ok(()) => {
+                    self.record_checksum(scale_id, plu.key, &plu.delta_hash, &now)
+                        .await?;
+                    sent_plus += 1;
                 }
                 Err(err) => {
                     tracing::error!(
@@ -274,8 +252,8 @@ impl SyncEngine {
                 .copied()
                 .filter(|k| !active_keys.contains(k))
             {
-                let ok = match handle.delete_plu(key).await {
-                    Ok(()) => true,
+                let delete_res = match handle.delete_plu(key).await {
+                    Ok(()) => Ok(()),
                     Err(
                         first_err @ AppError::Driver(
                             openscale_driver::DriverError::NotConnected
@@ -291,32 +269,17 @@ impl SyncEngine {
                             "Transient driver error during PLU delete; reconnecting and retrying"
                         );
                         match handle.connect().await {
-                            Ok(_) => match handle.delete_plu(key).await {
-                                Ok(()) => true,
-                                Err(retry_err) => {
-                                    tracing::error!(
-                                        scale_id = %scale_id,
-                                        did = key.did,
-                                        plu = key.plu,
-                                        error = %retry_err,
-                                        error_debug = ?retry_err,
-                                        "PLU delete failed after reconnect retry"
-                                    );
-                                    false
-                                }
-                            },
-                            Err(connect_err) => {
-                                tracing::error!(
-                                    scale_id = %scale_id,
-                                    did = key.did,
-                                    plu = key.plu,
-                                    error = %connect_err,
-                                    error_debug = ?connect_err,
-                                    "Scale reconnect failed during PLU delete"
-                                );
-                                false
-                            }
+                            Ok(_) => handle.delete_plu(key).await,
+                            Err(connect_err) => Err(connect_err),
                         }
+                    }
+                    Err(err) => Err(err),
+                };
+
+                match delete_res {
+                    Ok(()) => {
+                        let _ = self.delete_checksum(scale_id, key).await;
+                        deleted_plus += 1;
                     }
                     Err(err) => {
                         tracing::error!(
@@ -327,14 +290,8 @@ impl SyncEngine {
                             error_debug = ?err,
                             "PLU delete failed"
                         );
-                        false
+                        failed_plus += 1;
                     }
-                };
-                if ok {
-                    let _ = self.delete_checksum(scale_id, key).await;
-                    deleted_plus += 1;
-                } else {
-                    failed_plus += 1;
                 }
             }
         }
