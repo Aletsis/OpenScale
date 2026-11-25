@@ -48,6 +48,7 @@ import {
   Scale as ScaleIcon,
   Search,
   Send,
+  Settings,
   Sun,
   Trash2,
   Upload,
@@ -70,9 +71,21 @@ import { PriceChangeView } from "./components/PriceChangeView.js";
 import { SalesReportsView } from "./components/SalesReportsView.js";
 import { ScaleEditDialog } from "./components/ScaleEditDialog.js";
 import { ScaleImportDialog } from "./components/ScaleImportDialog.js";
+import { ScaleIndividualConfigDialog } from "./components/ScaleIndividualConfigDialog.js";
+import { ScaleSettingsView } from "./components/ScaleSettingsView.js";
 import { ServiceConsoleView } from "./components/ServiceConsoleView.js";
 
-type Tab = "scales" | "catalog" | "priceChange" | "masterTables" | "reports" | "service" | "barcodes" | "labels" | "sync";
+type Tab =
+  | "scales"
+  | "catalog"
+  | "priceChange"
+  | "masterTables"
+  | "reports"
+  | "service"
+  | "labels"
+  | "barcodes"
+  | "settings"
+  | "sync";
 
 interface SyncHistoryEntry {
   id: string;
@@ -161,6 +174,7 @@ export function App() {
   const [isDeletingScale, setIsDeletingScale] = useState(false);
   const [showBranchesDialog, setShowBranchesDialog] = useState(false);
   const [editingScale, setEditingScale] = useState<Scale | null>(null);
+  const [configuringScale, setConfiguringScale] = useState<Scale | null>(null);
   const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>("all");
   const [catalogBranchId, setCatalogBranchId] = useState<string>("all");
   const [showDeltaSyncDialog, setShowDeltaSyncDialog] = useState(false);
@@ -214,7 +228,8 @@ export function App() {
 
   const branchPluKeysQuery = useQuery({
     queryKey: ["branch_plu_keys", catalogBranchId],
-    enabled: selectedCatalogBranch?.catalog_mode === "selected" && Boolean(transport.listBranchPluKeys),
+    enabled:
+      selectedCatalogBranch?.catalog_mode === "selected" && Boolean(transport.listBranchPluKeys),
     queryFn: () =>
       transport.listBranchPluKeys
         ? transport.listBranchPluKeys(catalogBranchId)
@@ -617,7 +632,10 @@ export function App() {
         ),
       );
       await queryClient.invalidateQueries({ queryKey: ["scales"] });
-      toast({ variant: "success", message: "IPs intercambiadas correctamente entre ambas básculas." });
+      toast({
+        variant: "success",
+        message: "IPs intercambiadas correctamente entre ambas básculas.",
+      });
     } catch (err) {
       toast({ variant: "error", message: t("notifications.error", { message: String(err) }) });
     }
@@ -682,7 +700,9 @@ export function App() {
       : [...current, plu.key];
     try {
       await transport.setBranchPluKeys(selectedCatalogBranch.id, next);
-      await queryClient.invalidateQueries({ queryKey: ["branch_plu_keys", selectedCatalogBranch.id] });
+      await queryClient.invalidateQueries({
+        queryKey: ["branch_plu_keys", selectedCatalogBranch.id],
+      });
     } catch (err) {
       toast({ variant: "error", message: t("notifications.error", { message: String(err) }) });
     }
@@ -710,7 +730,9 @@ export function App() {
     try {
       const next = Array.from(merged.values());
       await transport.setBranchPluKeys(selectedCatalogBranch.id, next);
-      await queryClient.invalidateQueries({ queryKey: ["branch_plu_keys", selectedCatalogBranch.id] });
+      await queryClient.invalidateQueries({
+        queryKey: ["branch_plu_keys", selectedCatalogBranch.id],
+      });
       toast({
         variant: "success",
         message: assign
@@ -1130,6 +1152,16 @@ export function App() {
               size="icon"
               variant="ghost"
               disabled={syncScaleMutation.isPending}
+              onClick={() => setConfiguringScale(row.original)}
+              aria-label="Configuración individual"
+              title="Configuración individual (Parámetros y Bancos #748)"
+            >
+              <Settings className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              disabled={syncScaleMutation.isPending}
               onClick={() => setEditingScale(row.original)}
               aria-label={t("common.edit")}
               title="Editar báscula / sucursal"
@@ -1474,6 +1506,14 @@ export function App() {
             <FileCode2 className="h-4 w-4" />
             Label Formats
           </Button>
+          <Button
+            variant={activeTab === "settings" ? "default" : "ghost"}
+            className="justify-start"
+            onClick={() => setActiveTab("settings")}
+          >
+            <Settings className="h-4 w-4" />
+            {t("nav.settings")}
+          </Button>
         </nav>
 
         <div className="mt-auto flex items-center gap-2 border-t border-border pt-4">
@@ -1585,6 +1625,20 @@ export function App() {
                   onStatus={(message) => toast({ variant: "info", message })}
                 />
               </div>
+            </>
+          )}
+
+          {activeTab === "settings" && (
+            <>
+              <h2 className="text-xl font-semibold tracking-tight">
+                Configuración Global de Básculas y Aplicación
+              </h2>
+              <ScaleSettingsView
+                scales={scales}
+                branches={branches}
+                storeId={DEFAULT_STORE_ID}
+                onStatus={(message) => toast({ variant: "info", message })}
+              />
             </>
           )}
 
@@ -1712,8 +1766,7 @@ export function App() {
                               <span className="font-semibold text-foreground">{id.scale_name}</span>{" "}
                               <span className="text-muted-foreground">
                                 (S/N <code className="font-mono">{id.serial_number ?? "—"}</code>)
-                                cambió de IP:{" "}
-                                <code className="font-mono">{id.previous_ip}</code> →{" "}
+                                cambió de IP: <code className="font-mono">{id.previous_ip}</code> →{" "}
                                 <code className="font-mono font-semibold text-primary">
                                   {id.new_ip}
                                 </code>
@@ -1740,8 +1793,7 @@ export function App() {
                               <span className="font-semibold text-destructive">
                                 Conflicto en IP {id.ip_address}:
                               </span>{" "}
-                              registrada para{" "}
-                              <strong>{id.existing_scale_name}</strong> (S/N{" "}
+                              registrada para <strong>{id.existing_scale_name}</strong> (S/N{" "}
                               <code className="font-mono">{id.expected_serial ?? "—"}</code>), pero
                               respondió S/N{" "}
                               <code className="font-mono font-semibold">
@@ -2066,6 +2118,14 @@ export function App() {
         branches={branches}
         onClose={() => setEditingScale(null)}
         onSave={handleUpdateScale}
+      />
+
+      <ScaleIndividualConfigDialog
+        open={configuringScale !== null}
+        scale={configuringScale}
+        storeId={DEFAULT_STORE_ID}
+        onClose={() => setConfiguringScale(null)}
+        onStatus={(message) => toast({ variant: "info", message })}
       />
 
       <PluFormDialog

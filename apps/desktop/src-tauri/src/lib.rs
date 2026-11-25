@@ -16,6 +16,7 @@ use openscale_driver_xs::{
     LabelFormatRecord, MachineParameters, ScaleSettings748, ServiceWeightReading, XS_SERVICE_PORT,
     XsDriver, XsDriverConfig, XsServiceClient,
 };
+use openscale_storage::repos::ScaleConfigProfile;
 use openscale_storage::{DEFAULT_LOCAL_STORE_ID, Database, StorageConfig};
 use tauri::{Emitter, Manager, State};
 use tokio::sync::Mutex;
@@ -115,6 +116,57 @@ async fn swap_scale_ips(
     state
         .app
         .swap_scale_ips(scale_a_id, scale_b_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_app_setting(
+    state: State<'_, DesktopState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    state
+        .app
+        .get_app_setting(&key)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn set_app_setting(
+    state: State<'_, DesktopState>,
+    key: String,
+    value_json: String,
+) -> Result<(), String> {
+    state
+        .app
+        .set_app_setting(&key, &value_json)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_scale_config_profile(
+    state: State<'_, DesktopState>,
+    scope: String,
+    target_id: String,
+    family: String,
+) -> Result<Option<ScaleConfigProfile>, String> {
+    state
+        .app
+        .get_scale_config_profile(&scope, &target_id, &family)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_scale_config_profile(
+    state: State<'_, DesktopState>,
+    profile: ScaleConfigProfile,
+) -> Result<ScaleConfigProfile, String> {
+    state
+        .app
+        .save_scale_config_profile(profile)
         .await
         .map_err(|e| e.to_string())
 }
@@ -758,6 +810,10 @@ pub fn run() {
             discover_scales_with_identity,
             reassign_scale_ip,
             swap_scale_ips,
+            get_app_setting,
+            set_app_setting,
+            get_scale_config_profile,
+            save_scale_config_profile,
             list_branches,
             upsert_branch,
             delete_branch,

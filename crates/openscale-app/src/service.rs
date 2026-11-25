@@ -6,13 +6,13 @@ use openscale_domain::{
     AuditLog, BarcodeFormat, Branch, Department, LabelFormat, MoneyCents, Plu, PluKey,
     SalesSnapshot, Scale, ScaleSalesReport, StoredText, SyncMetadata, Tare, TaxRate,
 };
-use serde::{Deserialize, Serialize};
 use openscale_driver::DiscoveredScale;
 use openscale_storage::repos::{
     AuditRepository, BranchRepository, MasterTablesRepository, PluRepository,
-    SalesSnapshotRepository, ScaleRepository,
+    SalesSnapshotRepository, ScaleConfigProfile, ScaleRepository, SettingsRepository,
 };
 use openscale_storage::{DEFAULT_LOCAL_STORE_ID, Database};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::discovery::discover_all_scales;
@@ -98,6 +98,42 @@ impl OpenScaleApp {
 
     pub fn audit_repo(&self) -> AuditRepository {
         AuditRepository::new(self.db.pool().clone())
+    }
+
+    pub fn settings_repo(&self) -> SettingsRepository {
+        SettingsRepository::new(self.db.pool().clone())
+    }
+
+    pub async fn get_app_setting(&self, key: &str) -> Result<Option<String>, AppError> {
+        Ok(self.settings_repo().get_app_setting(key).await?)
+    }
+
+    pub async fn set_app_setting(&self, key: &str, value_json: &str) -> Result<(), AppError> {
+        Ok(self
+            .settings_repo()
+            .set_app_setting(key, value_json)
+            .await?)
+    }
+
+    pub async fn get_scale_config_profile(
+        &self,
+        scope: &str,
+        target_id: &str,
+        family: &str,
+    ) -> Result<Option<ScaleConfigProfile>, AppError> {
+        Ok(self
+            .settings_repo()
+            .get_profile(self.store_id, scope, target_id, family)
+            .await?)
+    }
+
+    pub async fn save_scale_config_profile(
+        &self,
+        mut profile: ScaleConfigProfile,
+    ) -> Result<ScaleConfigProfile, AppError> {
+        profile.store_id = self.store_id;
+        self.settings_repo().upsert_profile(&profile).await?;
+        Ok(profile)
     }
 
     pub async fn discover_scales(
