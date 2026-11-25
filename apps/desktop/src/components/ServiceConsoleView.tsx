@@ -1,21 +1,15 @@
-import { type Scale, decode1BppBitmapToRgba } from "@openscale/client";
+import { type Scale, type ScaleSettings748, decode1BppBitmapToRgba } from "@openscale/client";
 import { Badge, Button } from "@openscale/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { Monitor, Power, Printer, RefreshCw, Scale as ScaleIcon, Wrench } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { ScaleBanksEditor } from "./ScaleBanksEditor.js";
+
 interface ServiceWeightReading {
   raw: string;
   weight_display: string;
   status: string;
-}
-
-interface ScaleSettings748 {
-  version: string;
-  bank1: string;
-  bank2: string;
-  bank3: string;
-  bank4: string;
 }
 
 interface LcdFrameDto {
@@ -52,6 +46,7 @@ export function ServiceConsoleView({ scales, onStatus }: ServiceConsoleViewProps
   const [host, setHost] = useState<string>(xsScales[0]?.ip_address ?? "192.168.9.113");
   const [weight, setWeight] = useState<ServiceWeightReading | null>(null);
   const [settings748, setSettings748] = useState<ScaleSettings748 | null>(null);
+  const [settings748Baseline, setSettings748Baseline] = useState<ScaleSettings748 | null>(null);
   const [machineParams, setMachineParams] = useState<MachineParametersDto | null>(null);
   const [diagLog, setDiagLog] = useState<string[]>([]);
   const [scanCode, setScanCode] = useState("1");
@@ -377,6 +372,7 @@ export function ServiceConsoleView({ scales, onStatus }: ServiceConsoleViewProps
                     port: null,
                   });
                   setSettings748(cfg);
+                  setSettings748Baseline(cfg);
                   onStatus("Loaded #748 Scale Settings.");
                 })
               }
@@ -393,6 +389,7 @@ export function ServiceConsoleView({ scales, onStatus }: ServiceConsoleViewProps
                       port: null,
                       settings: settings748,
                     });
+                    setSettings748Baseline(settings748);
                     onStatus("Saved #748 Scale Settings.");
                   })
                 }
@@ -403,18 +400,11 @@ export function ServiceConsoleView({ scales, onStatus }: ServiceConsoleViewProps
           </div>
         </div>
         {settings748 && (
-          <div className="grid grid-cols-1 gap-2 font-mono text-xs md:grid-cols-4">
-            {(["bank1", "bank2", "bank3", "bank4"] as const).map((bank) => (
-              <label key={bank} className="flex flex-col gap-1">
-                <span>{bank.toUpperCase()}</span>
-                <input
-                  value={settings748[bank]}
-                  onChange={(ev) => setSettings748({ ...settings748, [bank]: ev.target.value })}
-                  className="rounded border border-border bg-background px-2 py-1"
-                />
-              </label>
-            ))}
-          </div>
+          <ScaleBanksEditor
+            value={settings748}
+            baseline={settings748Baseline}
+            onChange={setSettings748}
+          />
         )}
       </div>
 
